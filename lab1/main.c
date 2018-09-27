@@ -1,12 +1,11 @@
 #include <stdio.h>
 #include <string.h>
-#include <Windows.h>
-#include <process.h>
 #include <winsock2.h>
+#include <windows.h>
 
 #pragma comment(lib, "ws2_32")
 
-#define WINSOCK_VERSION MAKEWORD(2, 2)
+#define WINSOCK_VERSION_REQUIRED MAKEWORD(2, 2)
 
 const int PROXY_PORT = 10240; // port number of the proxy server
 const int THREAD_POOL_SIZE = 20; // size of the thread pool
@@ -34,15 +33,15 @@ int process(); // process the HTTP message
 int initializeMainSocket() {
     // initialize winsock
     WSADATA wsaData;
-    err = WSAStartup(WINSOCK_VERSION, &wsaData);
+    err = WSAStartup(WINSOCK_VERSION_REQUIRED, &wsaData);
     if(err) {
         fprintf(stderr, "winsock.dll not found.\n");
         return -1;
-    } else if(LOBYTE(wsaData.wVersion) != LOBYTE(WINSOCK_VERSION)
-                || HIBYTE(wsaData.wVersion) != HIBYTE(WINSOCK_VERSION)) {
+    } else if(LOBYTE(wsaData.wVersion) != LOBYTE(WINSOCK_VERSION_REQUIRED)
+                || HIBYTE(wsaData.wVersion) != HIBYTE(WINSOCK_VERSION_REQUIRED)) {
         fprintf(stderr, "Invalid Winsock version: %d.%d . Expected version: %d.%d .",
                     LOBYTE(wsaData.wVersion), HIBYTE(wsaData.wVersion),
-                    LOBYTE(WINSOCK_VERSION), HIBYTE(WINSOCK_VERSION));
+                    LOBYTE(WINSOCK_VERSION_REQUIRED), HIBYTE(WINSOCK_VERSION_REQUIRED));
         return -1;
     }
     printf("Initialized Winsock successfully.\n");
