@@ -8,12 +8,20 @@
 
 #define WINSOCK_VERSION MAKEWORD(2, 2)
 
-typedef struct sockaddr_in sockaddr_in;
-
 const int PROXY_PORT = 10240; // port number of the proxy server
 const int THREAD_POOL_SIZE = 20; // size of the thread pool
 
+typedef struct sockaddr_in sockaddr_in;
+typedef struct threadInfo {
+    SOCKET sd;
+} threadInfo;
+
+SOCKET mainSocket = INVALID_SOCKET;
 int err;
+
+int initializeMainSocket();
+int mainLoop();
+int finalizeMainSocket();
 
 int createThread(SOCKET sd);
 VOID CALLBACK threadMain(PTP_CALLBACK_INSTANCE instance, PVOID Context, PTP_WORK Work);
@@ -21,9 +29,9 @@ int parseHttpRequest();
 int process(); // process the HTTP message
 
 /*
- * Main thread of server.
+ * Inithalize Winsock and the main socket.
  */
-int main() {
+int initializeMainSocket() {
     // initialize winsock
     WSADATA wsaData;
     err = WSAStartup(WINSOCK_VERSION, &wsaData);
@@ -35,16 +43,14 @@ int main() {
         fprintf(stderr, "Invalid Winsock version: %d.%d . Expected version: %d.%d .",
                     LOBYTE(wsaData.wVersion), HIBYTE(wsaData.wVersion),
                     LOBYTE(WINSOCK_VERSION), HIBYTE(WINSOCK_VERSION));
-        WSACleanup();
         return -1;
     }
     printf("Initialized Winsock successfully.\n");
 
     // create and configure the main socket
-    SOCKET mainSocket = socket(PF_INET, SOCK_STREAM, 0);
+    mainSocket = socket(PF_INET, SOCK_STREAM, 0);
     if(mainSocket == INVALID_SOCKET) {
         fprintf(stderr, "Failed to create the main socket.\n");
-        WSACleanup();
         return -1;
     }
     printf("Created the main socket successfully.\n");
@@ -55,35 +61,66 @@ int main() {
     err = bind(mainSocket, (SOCKADDR*)&serverAddr, sizeof(SOCKADDR));
     if(err) {
         fprintf(stderr, "Failed to bind the socket to port %d.\n", PROXY_PORT);
-        closesocket(mainSocket);
-        WSACleanup();
         return -1;
     }
     printf("Bind the main socket to port %d successfully.\n", PROXY_PORT);
     err = listen(mainSocket, SOMAXCONN);
     if(err) {
         fprintf(stderr, "Failed to start listening on main socket.\n");
-        closesocket(mainSocket);
-        WSACleanup();
         return -1;
     }
-
-    // wait for connection requests and create threads
     printf("Start listening...\n");
     fflush(stdout);
+    return 0;
+}
+
+/*
+ * Wait for connection requests and create threads.
+ */
+int mainLoop() {
     while(1) {
         SOCKET sd = accept(mainSocket, NULL, NULL);
     }
+    return 0;
+}
 
+int finalizeMainSocket() {
     // close the main socket
-    err = closesocket(mainSocket);
-    if(err) {
-        fprintf(stderr, "Failed to close the main socket.\n");
-        WSACleanup();
-        return -1;
+    if(mainSocket != INVALID_SOCKET) {
+        err = closesocket(mainSocket);
+        if(err) {
+            fprintf(stderr, "Failed to close the main socket.\n");
+            WSACleanup();
+            return -1;
+        }
     }
 
     // clean up winsock
     WSACleanup();
+    return 0;
+}
+
+/*
+ * Main thread of server.
+ */
+int main() {
+    int err;
+
+    err = initializeMainSocket();
+    if(err == -1) {
+        finalizeMainSocket();
+        return -1;
+    }
+
+    err = mainLoop();
+    if(err == -1) {
+        finalizeMainSocket();
+        return -1;
+    }
+
+    err = finalizeMainSocket();
+    if(err == -1)
+        return -1;
+
     return 0;
 }
