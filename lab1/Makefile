@@ -1,2 +1,2 @@
 all:
-	clang main.c -lws2_32 -o main.exe
+	clang main.c session.c -o main.exe
