@@ -1,8 +1,11 @@
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <process.h>
 
 typedef struct in_addr in_addr;
+typedef struct sockaddr_in sockaddr_in;
+typedef struct addrinfo addrinfo;
 
 typedef struct siteRecord {
     char host[128];
@@ -34,5 +37,3 @@ redirectRecord *redirectRecords;
 unsigned __stdcall threadMain(void *context);
 void initializeServer();
 void finalizeServer();
-int parseHttpRequest();
-int process();

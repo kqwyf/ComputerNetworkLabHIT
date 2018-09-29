@@ -10,7 +10,7 @@
 
 #define WINSOCK_VERSION_REQUIRED MAKEWORD(2, 2)
 
-const int PROXY_PORT = 8080; // port number of the proxy server
+const short PROXY_PORT = 8080; // port number of the proxy server
 
 typedef struct sockaddr_in sockaddr_in;
 SOCKET mainSocket = INVALID_SOCKET;
@@ -138,7 +138,6 @@ int initializeMainSocket() {
         return -1;
     }
     printf("Start listening...\n");
-    fflush(stdout);
     return 0;
 }
 
@@ -152,6 +151,9 @@ unsigned __stdcall mainLoop(void *context) {
             break;
         threadInfo *info = (threadInfo*)malloc(sizeof(threadInfo));
         info->client = sd;
+        info->server = INVALID_SOCKET;
+        info->next = threads;
+        threads = info;
         _beginthreadex(NULL, 0, threadMain, info, 0, &info->td);
     }
     _endthreadex(0);
