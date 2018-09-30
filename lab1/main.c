@@ -155,6 +155,7 @@ unsigned __stdcall mainLoop(void *context) {
         info->next = threads;
         threads = info;
         _beginthreadex(NULL, 0, threadMain, info, 0, &info->td);
+        //threadMain(info);
     }
     _endthreadex(0);
     return 0;

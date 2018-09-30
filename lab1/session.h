@@ -1,3 +1,6 @@
+#ifndef SESSION_H
+#define SESSION_H
+
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -37,3 +40,5 @@ redirectRecord *redirectRecords;
 unsigned __stdcall threadMain(void *context);
 void initializeServer();
 void finalizeServer();
+
+#endif

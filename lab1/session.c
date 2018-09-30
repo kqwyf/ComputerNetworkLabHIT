@@ -10,8 +10,8 @@ const short HTTP_PORT = 80;
 
 typedef struct httpMessage {
     unsigned hostIp;
-    short hostPort;
     char host[128];
+    char hostPort[6];
     int bodyOffset;
     char *message;
 } httpMessage;
@@ -49,7 +49,8 @@ unsigned __stdcall threadMain(void *context) {
         fprintf(stderr, "Failed to parse the http message from server of thread %d. No host found.\n", info->td);
         goto close;
     }
-    
+    puts("Parsed HTTP request successfully.");
+
     // connect to the server
     info->server = connectToServer(&result);
     if(info->server == INVALID_SOCKET) {
@@ -60,7 +61,8 @@ unsigned __stdcall threadMain(void *context) {
     printf("Connected to the server of thread %d successfully.\n", info->td);
 
     // forward the message to server and wait for reply
-    len = send(info->server, buf, len, 0);
+    printf("Message to server of %d:\n%s\n", info->td, buf);
+    len = send(info->server, buf, len + 1, 0);
     if(len == SOCKET_ERROR) {
         fprintf(stderr, "Failed to send the message to server of thread %d. Error code: %d\n",
                 info->td, WSAGetLastError());
@@ -78,7 +80,7 @@ unsigned __stdcall threadMain(void *context) {
     len = process(buf, len);
 
     // send the reply to client
-    len = send(info->client, buf, len, 0);
+    len = send(info->client, buf, len + 1, 0);
     if(len == SOCKET_ERROR) {
         fprintf(stderr, "Failed to send the message to client of thread %d. Error code: %d\n",
                 info->td, WSAGetLastError());
@@ -151,8 +153,19 @@ int parseHttpMessage(char *message, int len, httpMessage *result) {
         if(!strncmp(message + i, "Host:", 5)) {
             i += 5;
             while(message[i] == ' ') i++;
-            for(int j = 0; i + j < len && message[i + j] != '\r' && message[i + j] != '\0' && message[i + j] != ':'; j++)
+            int j;
+            for(j = 0; i + j < len && message[i + j] != '\r' && message[i + j] != '\0' && message[i + j] != ':'; j++)
                 result->host[j] = message[i + j];
+            result->host[j] = '\0';
+            if(message[i + j] == ':') {
+                i += j + 1;
+                int k;
+                for(k = 0; message[i + k] != '\r' && message[i + k] != '\0'; k++)
+                    result->hostPort[k] = message[i + k];
+                result->hostPort[k] = '\0';
+            } else {
+                strcpy_s(result->hostPort, 6, "http");
+            }
             foundHost = TRUE;
         }
         while(message[i] != '\n' && message[i] != '\0') i++;
@@ -167,14 +180,19 @@ SOCKET connectToServer(httpMessage *message) {
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
-    int err = getaddrinfo(message->host, "http", &hints, &info);
+    int err = getaddrinfo(message->host, message->hostPort, &hints, &info);
     SOCKET server = INVALID_SOCKET;
     if(!err) {
         server = socket(PF_INET, SOCK_STREAM, 0);
         for(addrinfo *i = info; i != NULL; i = i->ai_next) {
             err = connect(server, i->ai_addr, i->ai_addrlen);
-            if(!err) break;
+            if(!err) {
+                printf("IP for host \"%s\" is \"%s\".\n", message->host, inet_ntoa(((sockaddr_in*)(i->ai_addr))->sin_addr));
+                break;
+            }
         }
+    } else {
+        printf("getsockaddr error. code:%d\n", WSAGetLastError());
     }
     freeaddrinfo(info);
     return err ? INVALID_SOCKET : server;
