@@ -6,12 +6,14 @@
 #include <windows.h>
 #include <process.h>
 
+#define ADDR_LEN 128
+
 typedef struct in_addr in_addr;
 typedef struct sockaddr_in sockaddr_in;
 typedef struct addrinfo addrinfo;
 
 typedef struct siteRecord {
-    char host[128];
+    char host[ADDR_LEN];
     struct siteRecord *next;
 } siteRecord;
 typedef struct userRecord {
@@ -19,8 +21,8 @@ typedef struct userRecord {
     struct userRecord *next;
 } userRecord;
 typedef struct redirectRecord {
-    char source[128];
-    char target[128];
+    char source[ADDR_LEN];
+    char target[ADDR_LEN];
     struct redirectRecord *next;
 } redirectRecord;
 

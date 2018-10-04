@@ -1,22 +1,26 @@
+#define _CRT_SECURE_NO_WARNINGS
+
 #include <io.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "session.h"
 
+#define BUFSIZE 65536
+#define HTTP_PORT 80
+#define PORT_LEN 6
+
 const char *CONFIG_FILE = "config.ini";
-const int BUFSIZE = 65536;
-const short HTTP_PORT = 80;
 
 typedef struct httpMessage {
     unsigned hostIp;
-    char host[128];
-    char hostPort[6];
+    char host[ADDR_LEN];
+    char hostPort[PORT_LEN];
     int bodyOffset;
     char *message;
 } httpMessage;
 
-int parseHttpMessage(char *message, int len, httpMessage *result);
+int parseHttpMessage(const char *message, int len, httpMessage *result);
 SOCKET connectToServer(httpMessage *message);
 int process(char *buf, int len);
 int closeSocket(SOCKET sd);
@@ -25,6 +29,9 @@ void freeSiteRecords();
 void freeUserRecords();
 void freeRedirectRecords();
 
+/*
+ * Session thread
+ */
 unsigned __stdcall threadMain(void *context) {
     int err;
 
@@ -91,13 +98,11 @@ close:
     // close sockets
     err = closeSocket(info->client);
     if(err)
-        fprintf(stderr, "Failed to shutdown the client socket of thread %d. Error code: %d\n",
-                info->td, err);
+        fprintf(stderr, "Failed to shutdown the client socket of thread %d. Error code: %d\n", info->td, err);
     if(info->server != INVALID_SOCKET) {
         err = closeSocket(info->server);
         if(err)
-            fprintf(stderr, "Failed to close the server socket of thread %d. Error code: %d\n",
-                    info->td, err);
+            fprintf(stderr, "Failed to close the server socket of thread %d. Error code: %d\n", info->td, err);
     }
     printf("Ended a thread: %d.\n", info->td);
     free(buf);
@@ -118,8 +123,16 @@ int closeSocket(SOCKET sd) {
     return 0;
 }
 
-int loadConfig() {
+int loadConfig(const char *file) {
     return 0;
+    freeSiteRecords();
+    freeUserRecords();
+    freeRedirectRecords();
+    cacheEnabled = FALSE;
+    siteRecords = NULL;
+    userRecords = NULL;
+    redirectRecords = NULL;
+    return -1;
 }
 
 void initializeServer() {
@@ -127,50 +140,51 @@ void initializeServer() {
     siteRecords = NULL;
     userRecords = NULL;
     redirectRecords = NULL;
-    if(_access(CONFIG_FILE, 0)) {
+    if(_access(CONFIG_FILE, 0) != 0) {
         puts("Config file not found.");
     } else {
         puts("Config file found.");
-        int err = loadConfig();
-        if(err) {
+        if(loadConfig(CONFIG_FILE) != 0) {
             puts("Failed to load config file.");
-            freeSiteRecords();
-            freeUserRecords();
-            freeRedirectRecords();
-            cacheEnabled = FALSE;
-            siteRecords = NULL;
-            userRecords = NULL;
-            redirectRecords = NULL;
         } else {
             puts("Loaded config successfully.");
         }
     }
 }
 
-int parseHttpMessage(char *message, int len, httpMessage *result) {
+/*
+ * Parse an HTTP message and get the host and the host port.
+ */
+int parseHttpMessage(const char *message, int len, httpMessage *result) {
     BOOL foundHost = FALSE;
-    for(int i = 0; i < len; i++) {
-        if(!strncmp(message + i, "Host:", 5)) {
-            i += 5;
-            while(message[i] == ' ') i++;
-            int j;
-            for(j = 0; i + j < len && message[i + j] != '\r' && message[i + j] != '\0' && message[i + j] != ':'; j++)
-                result->host[j] = message[i + j];
-            result->host[j] = '\0';
-            if(message[i + j] == ':') {
-                i += j + 1;
-                int k;
-                for(k = 0; message[i + k] != '\r' && message[i + k] != '\0'; k++)
-                    result->hostPort[k] = message[i + k];
-                result->hostPort[k] = '\0';
+    for(const char *i = message; i && *i; i = strchr(i, '\r') + 2) {
+        if(strncmp(i, "Host:", 5) == 0) {
+            i = strchr(i, ' ') + 1;
+            // get the port number if exists
+            result->hostPort[0] = '\0';
+            const char *sp = strchr(i, ':');
+            if(sp) {
+                int len = strchr(sp, '\r') - sp - 1;
+                if(len > 0 && len < PORT_LEN) {
+                    strncpy(result->hostPort, sp + 1, len);
+                    result->hostPort[len] = '\0';
+                }
+            }
+            if(result->hostPort[0] == '\0') {
+                strcpy(result->hostPort, "http");
+                sp = strchr(i, '\r');
+            }
+            // get the host
+            int len = sp - i;
+            if(len > 0 && len < ADDR_LEN) {
+                strncpy(result->host, i, len);
             } else {
-                strcpy_s(result->hostPort, 6, "http");
+                break;
             }
             foundHost = TRUE;
         }
-        while(message[i] != '\n' && message[i] != '\0') i++;
     }
-    return !(foundHost);
+    return foundHost ? 0 : 1;
 }
 
 SOCKET connectToServer(httpMessage *message) {
@@ -186,13 +200,10 @@ SOCKET connectToServer(httpMessage *message) {
         server = socket(PF_INET, SOCK_STREAM, 0);
         for(addrinfo *i = info; i != NULL; i = i->ai_next) {
             err = connect(server, i->ai_addr, i->ai_addrlen);
-            if(!err) {
-                printf("IP for host \"%s\" is \"%s\".\n", message->host, inet_ntoa(((sockaddr_in*)(i->ai_addr))->sin_addr));
-                break;
-            }
+            if(!err) break;
         }
     } else {
-        printf("getsockaddr error. code:%d\n", WSAGetLastError());
+        printf("Failed to get address info. Error code:%d\n", WSAGetLastError());
     }
     freeaddrinfo(info);
     return err ? INVALID_SOCKET : server;
@@ -205,7 +216,7 @@ int process(char *buf, int len) {
 int insertSiteRecord(char *host, int len) {
     siteRecord *record = (siteRecord*)malloc(sizeof(siteRecord));
     if(!record) return -1;
-    strncpy_s(record->host, 128, host, len);
+    strncpy(record->host, host, len);
     record->next = siteRecords;
     siteRecords = record;
     return 0;
@@ -223,8 +234,8 @@ int insertUserRecord(in_addr addr) {
 int insertRedirectRecord(char *source, int slen, char *target, int tlen) {
     redirectRecord *record = (redirectRecord*)malloc(sizeof(redirectRecord));
     if(!record) return -1;
-    strncpy_s(record->source, 128, source, slen);
-    strncpy_s(record->target, 128, target, tlen);
+    strncpy(record->source, source, slen);
+    strncpy(record->target, target, tlen);
     record->next = redirectRecords;
     redirectRecords = record;
     return 0;

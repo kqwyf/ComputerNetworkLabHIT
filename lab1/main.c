@@ -1,16 +1,15 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <winsock2.h>
 #include <windows.h>
+#include <winsock2.h>
 #include <process.h>
 #include "session.h"
 
 #pragma comment(lib, "ws2_32")
 
 #define WINSOCK_VERSION_REQUIRED MAKEWORD(2, 2)
-
-const short PROXY_PORT = 8080; // port number of the proxy server
+#define PROXY_PORT 8080
 
 typedef struct sockaddr_in sockaddr_in;
 SOCKET mainSocket = INVALID_SOCKET;
@@ -22,7 +21,7 @@ unsigned __stdcall mainLoop(void *context);
 int finalizeMainSocket();
 
 /*
- * Main thread of server.
+ * Main thread.
  */
 int main() {
     int err;
@@ -97,7 +96,7 @@ int main() {
 }
 
 /*
- * Inithalize Winsock and the main socket.
+ * Initialize Winsock and the main socket.
  */
 int initializeMainSocket() {
     // initialize winsock
@@ -106,9 +105,8 @@ int initializeMainSocket() {
     if(err) {
         fprintf(stderr, "winsock.dll not found.\n");
         return -1;
-    } else if(LOBYTE(wsaData.wVersion) != LOBYTE(WINSOCK_VERSION_REQUIRED)
-                || HIBYTE(wsaData.wVersion) != HIBYTE(WINSOCK_VERSION_REQUIRED)) {
-        fprintf(stderr, "Invalid Winsock version: %d.%d . Expected version: %d.%d .",
+    } else if(wsaData.wVersion != WINSOCK_VERSION_REQUIRED) {
+        fprintf(stderr, "Invalid Winsock version: %d.%d. Expected version: %d.%d.",
                     LOBYTE(wsaData.wVersion), HIBYTE(wsaData.wVersion),
                     LOBYTE(WINSOCK_VERSION_REQUIRED), HIBYTE(WINSOCK_VERSION_REQUIRED));
         return -1;
@@ -155,7 +153,6 @@ unsigned __stdcall mainLoop(void *context) {
         info->next = threads;
         threads = info;
         _beginthreadex(NULL, 0, threadMain, info, 0, &info->td);
-        //threadMain(info);
     }
     _endthreadex(0);
     return 0;
