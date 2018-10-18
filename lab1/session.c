@@ -25,6 +25,9 @@ SOCKET connectToServer(httpMessage *message);
 int process(char *buf, int len);
 int closeSocket(SOCKET sd);
 int loadConfig();
+int insertSiteRecord(char *host, int len);
+int insertUserRecord(in_addr addr);
+int insertRedirectRecord(char *source, int slen, char *target, int tlen);
 void freeSiteRecords();
 void freeUserRecords();
 void freeRedirectRecords();
@@ -57,6 +60,16 @@ unsigned __stdcall threadMain(void *context) {
         goto close;
     }
     puts("Parsed HTTP request successfully.");
+
+    // check if the server is blocked or redirected
+    const char *host = getRedirectedSite(result.host);
+    if(host == NULL) {
+        printf("Host %s has been blocked.\n", result.host);
+        goto close;
+    }
+    printf("Get host: %s\n", result.host);
+    strncpy(result.host, host, ADDR_LEN);
+    printf("The real host to be visited: %s\n", host);
 
     // connect to the server
     info->server = connectToServer(&result);
@@ -124,15 +137,50 @@ int closeSocket(SOCKET sd) {
 }
 
 int loadConfig(const char *file) {
+    FILE *f = fopen(file, "r");
+    char buf[256];
+    int state = 0;
+    while(fgets(buf, 256, f) != NULL) {
+        if(buf[0] == '#') continue; // '#' for a comment line
+        // remove the line break
+        int len = strlen(buf);
+        if(buf[len - 1] == '\n') buf[--len] = '\0';
+        if(buf[len - 1] == '\r') buf[--len] = '\0';
+        // switch the state
+        if(strncmp(buf, "[Wall]", 6) == 0)
+            state = 1;
+        else if(strncmp(buf, "[BlockedUser]", 13) == 0)
+            state = 2;
+        else if(strncmp(buf, "[Redirect]", 10) == 0)
+            state = 3;
+        else {
+            // insert config items
+            in_addr addr;
+            char *sp;
+            switch(state) {
+            case 0: // cache config
+                if(strncmp(buf, "CacheEnabled=1", 14) == 0)
+                    cacheEnabled = TRUE;
+                break;
+            case 1: // wall config
+                insertSiteRecord(buf, len);
+                break;
+            case 2: // user config
+                addr.S_un.S_addr = inet_addr(buf);
+                if(addr.S_un.S_addr == INADDR_NONE)
+                    break;
+                insertUserRecord(addr);
+                break;
+            case 3: // redirect config
+                sp = strchr(buf, ' ');
+                if(sp == NULL) break;
+                insertRedirectRecord(buf, sp - buf, sp + 1, buf + len - sp - 1);
+                break;
+            }
+        }
+    }
+    fclose(f);
     return 0;
-    freeSiteRecords();
-    freeUserRecords();
-    freeRedirectRecords();
-    cacheEnabled = FALSE;
-    siteRecords = NULL;
-    userRecords = NULL;
-    redirectRecords = NULL;
-    return -1;
 }
 
 void initializeServer() {
@@ -178,6 +226,7 @@ int parseHttpMessage(const char *message, int len, httpMessage *result) {
             int len = sp - i;
             if(len > 0 && len < ADDR_LEN) {
                 strncpy(result->host, i, len);
+                result->host[len] = '\0';
             } else {
                 break;
             }
@@ -209,6 +258,23 @@ SOCKET connectToServer(httpMessage *message) {
     return err ? INVALID_SOCKET : server;
 }
 
+const char *getRedirectedSite(const char *host) {
+    for(siteRecord *record = siteRecords; record; record = record->next)
+        if(strcmp(record->host, host) == 0)
+            return NULL;
+    for(redirectRecord *record = redirectRecords; record; record = record->next)
+        if(strcmp(record->source, host) == 0)
+            return record->target;
+    return host;
+}
+
+BOOL isBlockedUser(const sockaddr_in addr) {
+    for(userRecord *record = userRecords; record; record = record->next)
+        if(record->addr.S_un.S_addr == addr.sin_addr.S_un.S_addr)
+            return TRUE;
+    return FALSE;
+}
+
 int process(char *buf, int len) {
     return len;
 }
@@ -217,6 +283,7 @@ int insertSiteRecord(char *host, int len) {
     siteRecord *record = (siteRecord*)malloc(sizeof(siteRecord));
     if(!record) return -1;
     strncpy(record->host, host, len);
+    record->host[len] = '\0';
     record->next = siteRecords;
     siteRecords = record;
     return 0;
@@ -235,7 +302,9 @@ int insertRedirectRecord(char *source, int slen, char *target, int tlen) {
     redirectRecord *record = (redirectRecord*)malloc(sizeof(redirectRecord));
     if(!record) return -1;
     strncpy(record->source, source, slen);
+    record->source[slen] = '\0';
     strncpy(record->target, target, tlen);
+    record->target[tlen] = '\0';
     record->next = redirectRecords;
     redirectRecords = record;
     return 0;

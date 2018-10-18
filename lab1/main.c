@@ -48,8 +48,8 @@ int main() {
         char cmd[32];
         fgets(cmd, sizeof(cmd), stdin);
         int len = strlen(cmd);
-        for(int i = len - 1; i > 0; i--)
-            if(cmd[i] == ' ' || cmd[i] == '\n' || cmd[i] == '\r') cmd[i] = '\0';
+        while(len > 0)
+            if(cmd[len - 1] == ' ' || cmd[len - 1] == '\n' || cmd[len - 1] == '\r') cmd[--len] = '\0';
             else break;
         if(!strcmp(cmd, "c") || !strcmp(cmd, "cache status")) {
             if(cacheEnabled)
@@ -57,17 +57,37 @@ int main() {
             else
                 puts("Cache is disabled.");
         } else if(!strcmp(cmd, "w") || !strcmp(cmd, "wall status")) {
-            puts("No wall status.");
+            puts("Blocked sites:");
+            if(siteRecords == NULL)
+                puts("None");
+            else {
+                for(siteRecord* record = siteRecords; record; record = record->next)
+                    printf("%s\n", record->host);
+            }
         } else if(!strcmp(cmd, "u") || !strcmp(cmd, "user status")) {
-            puts("No user status.");
+            puts("Blocked IPs:");
+            if(userRecords == NULL)
+                puts("None");
+            else {
+                for(userRecord* record = userRecords; record; record = record->next)
+                    printf("%s\n", inet_ntoa(record->addr));
+            }
         } else if(!strcmp(cmd, "r") || !strcmp(cmd, "redirect status")) {
-            puts("No redirect status.");
+            puts("Redirect records:");
+            if(redirectRecords == NULL)
+                puts("None");
+            else {
+                for(redirectRecord *record = redirectRecords; record; record = record->next)
+                    printf("%s -> %s\n", record->source, record->target);
+            }
         } else if(!strcmp(cmd, "s") || !strcmp(cmd, "status")) {
             puts("No status.");
         } else if(!strcmp(cmd, "e") || !strcmp(cmd, "exit")) {
             break;
         } else if(!strcmp(cmd, "q") || !strcmp(cmd, "quit")) {
             break;
+        } else if(len == 0) {
+            continue;
         } else {
             puts("Invalid command.");
         }
@@ -144,9 +164,14 @@ int initializeMainSocket() {
  */
 unsigned __stdcall mainLoop(void *context) {
     while(1) {
-        SOCKET sd = accept(mainSocket, NULL, NULL);
+        sockaddr_in addr;
+        SOCKET sd = accept(mainSocket, (SOCKADDR*)&addr, NULL);
         if(sd == INVALID_SOCKET && WSAGetLastError() == WSAEINTR)
             break;
+        if(isBlockedUser(addr)) {
+            closesocket(sd);
+            continue;
+        }
         threadInfo *info = (threadInfo*)malloc(sizeof(threadInfo));
         info->client = sd;
         info->server = INVALID_SOCKET;

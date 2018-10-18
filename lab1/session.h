@@ -40,6 +40,8 @@ userRecord *userRecords;
 redirectRecord *redirectRecords;
 
 unsigned __stdcall threadMain(void *context);
+const char *getRedirectedSite(const char *host);
+BOOL isBlockedUser(const sockaddr_in addr);
 void initializeServer();
 void finalizeServer();
 
