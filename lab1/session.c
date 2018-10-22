@@ -5,24 +5,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include "session.h"
+#include "httpMessage.h"
+#include "cache.h"
 
-#define BUFSIZE 65536
-#define HTTP_PORT 80
-#define PORT_LEN 6
-
+// local data shared by all threads
 const char *CONFIG_FILE = "config.ini";
 
-typedef struct httpMessage {
-    unsigned hostIp;
-    char host[ADDR_LEN];
-    char hostPort[PORT_LEN];
-    int bodyOffset;
-    char *message;
-} httpMessage;
-
-int parseHttpMessage(const char *message, int len, httpMessage *result);
-SOCKET connectToServer(httpMessage *message);
-int process(char *buf, int len);
+SOCKET connectToServer(const char *host, const char *hostPort);
+BOOL redirect(httpMessage *request);
 int closeSocket(SOCKET sd);
 int loadConfig();
 int insertSiteRecord(char *host, int len);
@@ -36,78 +26,141 @@ void freeRedirectRecords();
  * Session thread
  */
 unsigned __stdcall threadMain(void *context) {
-    int err;
+    int err, len;
 
     // initialize
     threadInfo *info = (threadInfo*)context;
     printf("Created a new thread: %d.\n", info->td);
 
-    // receive message from client
-    char *buf = (char*)calloc(BUFSIZE, sizeof(char));
-    int len = recv(info->client, buf, BUFSIZE, 0);
-    if(len == SOCKET_ERROR) {
-        fprintf(stderr, "Failed to receive the message from client of thread %d. Error code: %d\n",
-                info->td, WSAGetLastError());
+    BOOL connected = FALSE;
+    char *buf = (char*)malloc(sizeof(char)*BUFSIZE);
+    httpMessage *request = (httpMessage*)malloc(sizeof(httpMessage));
+    httpMessage *serverResponse = (httpMessage*)malloc(sizeof(httpMessage));
+    httpMessage *tmpResponse = (httpMessage*)malloc(sizeof(httpMessage));
+    if(buf == NULL || request == NULL || tmpResponse == NULL || serverResponse == NULL) {
+        fprintf(stderr, "Failed to allocate memory.\n");
         goto close;
     }
-    printf("Message from client of %d:\n%s\n", info->td, buf);
+    request->header = serverResponse->header = tmpResponse->header = NULL;
+    request->extra = serverResponse->extra = tmpResponse->extra = NULL;
 
-    // parse the HTTP message header
-    httpMessage result;
-    err = parseHttpMessage(buf, len, &result);
-    if(err) {
-        fprintf(stderr, "Failed to parse the http message from server of thread %d. No host found.\n", info->td);
-        goto close;
-    }
-    puts("Parsed HTTP request successfully.");
+    while(1) {
+        // receive message from client
+        len = recv(info->client, buf, BUFSIZE, 0);
+        if(len == SOCKET_ERROR) {
+            fprintf(stderr, "Failed to receive the message from client of thread %d. Error code: %d\n",
+                    info->td, WSAGetLastError());
+            break;
+        }
+        printf("Message from client of %d:\n%s\n", info->td, buf);
 
-    // check if the server is blocked or redirected
-    const char *host = getRedirectedSite(result.host);
-    if(host == NULL) {
-        printf("Host %s has been blocked.\n", result.host);
-        goto close;
-    }
-    printf("Get host: %s\n", result.host);
-    strncpy(result.host, host, ADDR_LEN);
-    printf("The real host to be visited: %s\n", host);
+        // parse the HTTP message header
+        clearHttpMessage(request);
+        err = parseHttpMessage(buf, len, request);
+        if(request == NULL || err) {
+            fprintf(stderr, "Failed to parse the http message from server of thread %d. Error code: %d\n", info->td, err);
+            continue;
+        }
+        puts("Parsed HTTP request successfully.");
+        printf("Get host: %s\n", request->host);
 
-    // connect to the server
-    info->server = connectToServer(&result);
-    if(info->server == INVALID_SOCKET) {
-        fprintf(stderr, "Failed to connect to server of thread %d. Error code: %d\n",
-                info->td, WSAGetLastError());
-        goto close;
-    }
-    printf("Connected to the server of thread %d successfully.\n", info->td);
+        // check if the server is blocked or redirected
+        BOOL responseReadyFlag = FALSE;
+        char host[ADDR_LEN];
+        strcpy(host, request->host);
+        if(redirect(request)) {
+            if(getValueHandle(request, "Host") == NULL) {
+                printf("Host %s has been blocked.\n", host);
+                clearHttpMessage(serverResponse);
+                strcpy(serverResponse->firstline, "HTTP/1.1 404 Not Found\r\n\r\n");
+                responseReadyFlag = TRUE;
+            } else {
+                writeMessageTo(request, buf);
+            }
+            printf("The real host to be visited: %s\n", request->host);
+        }
 
-    // forward the message to server and wait for reply
-    printf("Message to server of %d:\n%s\n", info->td, buf);
-    len = send(info->server, buf, len + 1, 0);
-    if(len == SOCKET_ERROR) {
-        fprintf(stderr, "Failed to send the message to server of thread %d. Error code: %d\n",
-                info->td, WSAGetLastError());
-        goto close;
-    }
-    len = recv(info->server, buf, BUFSIZE, 0);
-    if(len == SOCKET_ERROR) {
-        fprintf(stderr, "Failed to receive the message from server of thread %d. Error code: %d\n",
-                info->td, WSAGetLastError());
-        goto close;
-    }
-    printf("Message from server of %d:\n%s\n", info->td, buf);
+        /*
+         * Control reaches there through any path guarantees that request is a proper request
+         * and buf is corresponding to request, or a proper serverResponse has been set.
+         */
 
-    // process the reply
-    len = process(buf, len);
+        if(!responseReadyFlag && cacheEnabled) {
+            clearHttpMessage(serverResponse);
+            char lastModified[TIME_LEN];
+            err = getCachedData(request->firstline, serverResponse, lastModified);
+            if(err == CACHE_OK) {
+                responseReadyFlag = TRUE;
+            } else if(err == CACHE_DEAD){
+                insertField(request, "If-Modified-Since", lastModified);
+                writeMessageTo(request, buf);
+            } else if(err == CACHE_NOT_FOUND) {
+            }
+        }
+        if(!responseReadyFlag) {
+            // connect to the server
+            if(!connected) {
+                info->server = connectToServer(request->host, request->hostPort);
+                if(info->server == INVALID_SOCKET) {
+                    fprintf(stderr, "Failed to connect to server of thread %d. Error code: %d\n",
+                            info->td, WSAGetLastError());
+                    break;
+                }
+                connected = TRUE;
+                printf("Connected to the server of thread %d successfully.\n", info->td);
+            }
 
-    // send the reply to client
-    len = send(info->client, buf, len + 1, 0);
-    if(len == SOCKET_ERROR) {
-        fprintf(stderr, "Failed to send the message to client of thread %d. Error code: %d\n",
-                info->td, WSAGetLastError());
-        goto close;
+            // forward the message to server and wait for reply
+            printf("Message to server of %d:\n%s\n", info->td, buf);
+            len = send(info->server, buf, len, 0);
+            if(len == SOCKET_ERROR) {
+                fprintf(stderr, "Failed to send the message to server of thread %d. Error code: %d\n",
+                        info->td, WSAGetLastError());
+                continue;
+            }
+            len = recv(info->server, buf, BUFSIZE, 0);
+            if(len == SOCKET_ERROR) {
+                fprintf(stderr, "Failed to receive the message from server of thread %d. Error code: %d\n",
+                        info->td, WSAGetLastError());
+                continue;
+            }
+            printf("Message from server of %d:\n%s\n", info->td, buf);
+            if(cacheEnabled) {
+                clearHttpMessage(tmpResponse);
+                err = parseHttpMessage(buf, len, tmpResponse);
+                if(strcmp(RESPONSE_STATUS(tmpResponse), HTTP_STATUS_NOT_MODIFIED) == 0) {
+                    responseReadyFlag = TRUE; // the cached response can be used
+                } else {
+                    cacheData(tmpResponse);
+                }
+            }
+        }
+        if(responseReadyFlag) {
+            len = writeMessageTo(serverResponse, buf);
+        }
+
+        /*
+         * Control reaches there through any path guarantees that buf is a proper response in string.
+         */
+
+        // send the reply to client
+        len = send(info->client, buf, len, 0);
+        if(len == SOCKET_ERROR) {
+            fprintf(stderr, "Failed to send the message to client of thread %d. Error code: %d\n",
+                    info->td, WSAGetLastError());
+            continue;
+        }
     }
 
 close:
+    if(buf)
+        free(buf);
+    if(request != NULL)
+        freeHttpMessage(request);
+    if(serverResponse != NULL)
+        freeHttpMessage(serverResponse);
+    if(tmpResponse != NULL)
+        freeHttpMessage(tmpResponse);
     // close sockets
     err = closeSocket(info->client);
     if(err)
@@ -118,7 +171,6 @@ close:
             fprintf(stderr, "Failed to close the server socket of thread %d. Error code: %d\n", info->td, err);
     }
     printf("Ended a thread: %d.\n", info->td);
-    free(buf);
     _endthreadex(0);
     return 0;
 }
@@ -158,24 +210,24 @@ int loadConfig(const char *file) {
             in_addr addr;
             char *sp;
             switch(state) {
-            case 0: // cache config
-                if(strncmp(buf, "CacheEnabled=1", 14) == 0)
-                    cacheEnabled = TRUE;
-                break;
-            case 1: // wall config
-                insertSiteRecord(buf, len);
-                break;
-            case 2: // user config
-                addr.S_un.S_addr = inet_addr(buf);
-                if(addr.S_un.S_addr == INADDR_NONE)
+                case 0: // cache config
+                    if(strncmp(buf, "CacheEnabled=1", 14) == 0)
+                        cacheEnabled = TRUE;
                     break;
-                insertUserRecord(addr);
-                break;
-            case 3: // redirect config
-                sp = strchr(buf, ' ');
-                if(sp == NULL) break;
-                insertRedirectRecord(buf, sp - buf, sp + 1, buf + len - sp - 1);
-                break;
+                case 1: // wall config
+                    insertSiteRecord(buf, len);
+                    break;
+                case 2: // user config
+                    addr.S_un.S_addr = inet_addr(buf);
+                    if(addr.S_un.S_addr == INADDR_NONE)
+                        break;
+                    insertUserRecord(addr);
+                    break;
+                case 3: // redirect config
+                    sp = strchr(buf, ' ');
+                    if(sp == NULL) break;
+                    insertRedirectRecord(buf, sp - buf, sp + 1, buf + len - sp - 1);
+                    break;
             }
         }
     }
@@ -200,50 +252,14 @@ void initializeServer() {
     }
 }
 
-/*
- * Parse an HTTP message and get the host and the host port.
- */
-int parseHttpMessage(const char *message, int len, httpMessage *result) {
-    BOOL foundHost = FALSE;
-    for(const char *i = message; i && *i; i = strchr(i, '\r') + 2) {
-        if(strncmp(i, "Host:", 5) == 0) {
-            i = strchr(i, ' ') + 1;
-            // get the port number if exists
-            result->hostPort[0] = '\0';
-            const char *sp = strchr(i, ':');
-            if(sp) {
-                int len = strchr(sp, '\r') - sp - 1;
-                if(len > 0 && len < PORT_LEN) {
-                    strncpy(result->hostPort, sp + 1, len);
-                    result->hostPort[len] = '\0';
-                }
-            }
-            if(result->hostPort[0] == '\0') {
-                strcpy(result->hostPort, "http");
-                sp = strchr(i, '\r');
-            }
-            // get the host
-            int len = sp - i;
-            if(len > 0 && len < ADDR_LEN) {
-                strncpy(result->host, i, len);
-                result->host[len] = '\0';
-            } else {
-                break;
-            }
-            foundHost = TRUE;
-        }
-    }
-    return foundHost ? 0 : 1;
-}
-
-SOCKET connectToServer(httpMessage *message) {
+SOCKET connectToServer(const char *host, const char *hostPort) {
     addrinfo *info;
     addrinfo hints;
     ZeroMemory(&hints, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
-    int err = getaddrinfo(message->host, message->hostPort, &hints, &info);
+    int err = getaddrinfo(host, hostPort, &hints, &info);
     SOCKET server = INVALID_SOCKET;
     if(!err) {
         server = socket(PF_INET, SOCK_STREAM, 0);
@@ -258,14 +274,24 @@ SOCKET connectToServer(httpMessage *message) {
     return err ? INVALID_SOCKET : server;
 }
 
-const char *getRedirectedSite(const char *host) {
-    for(siteRecord *record = siteRecords; record; record = record->next)
-        if(strcmp(record->host, host) == 0)
-            return NULL;
+BOOL redirect(httpMessage *request) {
+    //TODO: change the firstline
+    BOOL result = FALSE;
     for(redirectRecord *record = redirectRecords; record; record = record->next)
-        if(strcmp(record->source, host) == 0)
-            return record->target;
-    return host;
+        if(strcmp(record->source, request->host) == 0) {
+            removeField(request, "Host");
+            insertField(request, "Host", record->target);
+            strcpy(request->host, record->target);
+            strcpy(request->hostPort, "http");
+            result = TRUE;
+        }
+    for(siteRecord *record = siteRecords; record; record = record->next)
+        if(strcmp(record->host, request->host) == 0) {
+            removeField(request, "Host");
+            request->host[0] = '\0';
+            result = TRUE;
+        }
+    return result;
 }
 
 BOOL isBlockedUser(const sockaddr_in addr) {
@@ -273,10 +299,6 @@ BOOL isBlockedUser(const sockaddr_in addr) {
         if(record->addr.S_un.S_addr == addr.sin_addr.S_un.S_addr)
             return TRUE;
     return FALSE;
-}
-
-int process(char *buf, int len) {
-    return len;
 }
 
 int insertSiteRecord(char *host, int len) {

@@ -5,8 +5,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <process.h>
-
-#define ADDR_LEN 128
+#include "constants.h"
 
 typedef struct in_addr in_addr;
 typedef struct sockaddr_in sockaddr_in;
@@ -40,7 +39,6 @@ userRecord *userRecords;
 redirectRecord *redirectRecords;
 
 unsigned __stdcall threadMain(void *context);
-const char *getRedirectedSite(const char *host);
 BOOL isBlockedUser(const sockaddr_in addr);
 void initializeServer();
 void finalizeServer();

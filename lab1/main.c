@@ -8,9 +8,6 @@
 
 #pragma comment(lib, "ws2_32")
 
-#define WINSOCK_VERSION_REQUIRED MAKEWORD(2, 2)
-#define PROXY_PORT 8080
-
 typedef struct sockaddr_in sockaddr_in;
 SOCKET mainSocket = INVALID_SOCKET;
 threadInfo *threads;
@@ -168,7 +165,16 @@ unsigned __stdcall mainLoop(void *context) {
         SOCKET sd = accept(mainSocket, (SOCKADDR*)&addr, NULL);
         if(sd == INVALID_SOCKET && WSAGetLastError() == WSAEINTR)
             break;
+        //TODO: how to get the user's IP?
+        printf("my IP: %s\n", inet_ntoa(addr.sin_addr));
         if(isBlockedUser(addr)) {
+            closesocket(sd);
+            continue;
+        }
+        int timeout = TIMEOUT;
+        int err = setsockopt(sd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(int));
+        if(err) {
+            fprintf(stderr, "Failed to set receiving timeout. Error code: %d\n", WSAGetLastError());
             closesocket(sd);
             continue;
         }
