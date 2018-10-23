@@ -29,6 +29,7 @@ void freeRedirectRecords();
 unsigned __stdcall threadMain(void *context) {
     int err, len;
     BOOL connectionCloseFlag = FALSE;
+    BOOL httpsMode = FALSE;
 
     // initialize
     threadInfo *info = (threadInfo*)context;
@@ -47,6 +48,7 @@ unsigned __stdcall threadMain(void *context) {
     request->extra = serverResponse->extra = tmpResponse->extra = NULL;
 
     while(1) {
+        BOOL localResponseFlag = FALSE;
         connectionCloseFlag = FALSE;
         // receive message from client
         if(!isReadable(info->client)) continue;
@@ -63,61 +65,63 @@ unsigned __stdcall threadMain(void *context) {
         } else if(len == 0)
             break;
         buf[len] = '\0';
-        printf("Message from client of %d:\n%s\n", info->td, buf);
+        if(httpsMode) printf("Received message from client of %d. Length: %d\n", info->td, len);
+        else printf("Message from client of %d:\n%s\n", info->td, buf);
 
-        // parse the HTTP message header
-        clearHttpMessage(request);
-        err = parseHttpMessage(buf, len, request);
-        if(err) {
-            fprintf(stderr, "Failed to parse the http message from client of thread %d. Error code: %d\n", info->td, err);
-            fprintf(stderr, "message length: %d\n", len);
-            continue;
-        }
-        puts("Parsed HTTP request successfully.");
-        printf("Get host: %s\n", request->host);
-
-        // check if the connection should be closed
-        const char *connectionField = getValueHandle(request, "Connection");
-        connectionCloseFlag |= (connectionField != NULL && _stricmp(connectionField, "Close") == 0);
-        const char *proxyConnectionField = getValueHandle(request, "Proxy-Connection");
-        connectionCloseFlag |= (proxyConnectionField != NULL && _stricmp(proxyConnectionField, "Close") == 0);
-
-        // check if the server is blocked or redirected
-        BOOL localResponseFlag = FALSE;
-        char host[ADDR_LEN];
-        strcpy(host, request->host);
-        if(redirect(request)) {
-            if(getValueHandle(request, "Host") == NULL) {
-                printf("Host %s has been blocked.\n", host);
-                clearHttpMessage(serverResponse);
-                strcpy(serverResponse->firstline, "HTTP/1.1 404 Not Found\r\n\r\n");
-                localResponseFlag = TRUE;
-            } else {
-                writeMessageTo(request, buf);
+        if(!httpsMode) {
+            // parse the HTTP message header
+            clearHttpMessage(request);
+            err = parseHttpMessage(buf, len, request);
+            if(err) {
+                fprintf(stderr, "Failed to parse the http message from client of thread %d. Error code: %d\n", info->td, err);
+                continue;
             }
-            printf("The real host to be visited: %s\n", request->host);
-        }
+            puts("Parsed HTTP request successfully.");
+            printf("Get host: %s\n", request->host);
 
-        /*
-         * Control reaches there through any path guarantees that request is a proper request
-         * and buf is corresponding to request, or a proper serverResponse has been set.
-         */
+            // check if the connection should be closed
+            const char *connectionField = getValueHandle(request, "Connection");
+            connectionCloseFlag |= (connectionField != NULL && _stricmp(connectionField, "Close") == 0);
+            const char *proxyConnectionField = getValueHandle(request, "Proxy-Connection");
+            connectionCloseFlag |= (proxyConnectionField != NULL && _stricmp(proxyConnectionField, "Close") == 0);
 
-        if(!localResponseFlag && cacheEnabled) {
-            clearHttpMessage(serverResponse);
-            char lastModified[TIME_LEN];
-            err = getCachedData(request->firstline, serverResponse, lastModified);
-            if(err == CACHE_OK) {
-                localResponseFlag = TRUE;
-            } else if(err == CACHE_DEAD){
-                insertField(request, "If-Modified-Since", lastModified);
-                writeMessageTo(request, buf);
-            } else if(err == CACHE_NOT_FOUND) {
+            // check if the server is blocked or redirected
+            localResponseFlag = FALSE;
+            char host[ADDR_LEN];
+            strcpy(host, request->host);
+            if(redirect(request)) {
+                if(getValueHandle(request, "Host") == NULL) {
+                    printf("Host %s has been blocked.\n", host);
+                    clearHttpMessage(serverResponse);
+                    strcpy(serverResponse->firstline, HTTP_NOT_FOUND_RESPONSE);
+                    localResponseFlag = TRUE;
+                } else {
+                    writeMessageTo(request, buf);
+                }
+                printf("The real host to be visited: %s\n", request->host);
+            }
+
+            /*
+             * Control reaches there through any path guarantees that request is a proper request
+             * and buf is corresponding to request, or a proper serverResponse has been set.
+             */
+
+            if(!localResponseFlag && cacheEnabled) {
+                clearHttpMessage(serverResponse);
+                char lastModified[TIME_LEN];
+                err = getCachedData(request->firstline, serverResponse, lastModified);
+                if(err == CACHE_OK) {
+                    localResponseFlag = TRUE;
+                } else if(err == CACHE_DEAD){
+                    insertField(request, "If-Modified-Since", lastModified);
+                    writeMessageTo(request, buf);
+                } else if(err == CACHE_NOT_FOUND) {
+                }
             }
         }
 
         if(!localResponseFlag) {
-            if(!connected) {
+            if(!httpsMode && !connected) {
                 // connect to the server
                 info->server = connectToServer(request->host, request->hostPort);
                 if(info->server == INVALID_SOCKET) {
@@ -126,16 +130,25 @@ unsigned __stdcall threadMain(void *context) {
                     break;
                 }
                 connected = TRUE;
+                if(strcmp(REQUEST_METHOD(request), "CONNECT") == 0) { // HTTPS
+                    clearHttpMessage(serverResponse);
+                    strcpy(serverResponse->firstline, HTTP_CONNECT_RESPONSE);
+                    localResponseFlag = TRUE;
+                    httpsMode = TRUE;
+                }
                 printf("Connected to the server of thread %d successfully.\n", info->td);
             }
 
-            // forward the message to server and wait for reply
-            printf("Message to server of %d:\n%s\n", info->td, buf);
-            len = send(info->server, buf, len, 0);
-            if(len == SOCKET_ERROR) {
-                fprintf(stderr, "Failed to send the message to server of thread %d. Error code: %d\n",
-                        info->td, WSAGetLastError());
-                continue; // TODO: return an error message to the client
+            if(!localResponseFlag) {
+                // forward the message to server and wait for reply
+                if(httpsMode) printf("Sending message to server of %d. Length: %d\n", info->td, len);
+                else printf("Message to server of %d:\n%s\n", info->td, buf);
+                len = send(info->server, buf, len, 0);
+                if(len == SOCKET_ERROR) {
+                    fprintf(stderr, "Failed to send the message to server of thread %d. Error code: %d\n",
+                            info->td, WSAGetLastError());
+                    continue; // TODO: return an error message to the client
+                }
             }
         }
 
@@ -151,7 +164,8 @@ unsigned __stdcall threadMain(void *context) {
                 } else if(len == 0)
                     break;
                 buf[len] = '\0';
-                printf("Message from server of %d:\n%s\n", info->td, buf);
+                if(httpsMode) printf("Receiving message from server of %d. Length: %d\n", info->td, len);
+                else printf("Message from server of %d:\n%s\n", info->td, buf);
                 if(cacheEnabled) {
                     clearHttpMessage(tmpResponse);
                     err = parseHttpMessage(buf, len, tmpResponse);
