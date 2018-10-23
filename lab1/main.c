@@ -171,13 +171,6 @@ unsigned __stdcall mainLoop(void *context) {
             closesocket(sd);
             continue;
         }
-        int timeout = TIMEOUT;
-        int err = setsockopt(sd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(int));
-        if(err) {
-            fprintf(stderr, "Failed to set receiving timeout. Error code: %d\n", WSAGetLastError());
-            closesocket(sd);
-            continue;
-        }
         threadInfo *info = (threadInfo*)malloc(sizeof(threadInfo));
         info->client = sd;
         info->server = INVALID_SOCKET;

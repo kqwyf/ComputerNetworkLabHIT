@@ -11,6 +11,7 @@
 // local data shared by all threads
 const char *CONFIG_FILE = "config.ini";
 
+BOOL isReadable(SOCKET sd);
 SOCKET connectToServer(const char *host, const char *hostPort);
 BOOL redirect(httpMessage *request);
 int closeSocket(SOCKET sd);
@@ -27,6 +28,7 @@ void freeRedirectRecords();
  */
 unsigned __stdcall threadMain(void *context) {
     int err, len;
+    BOOL connectionCloseFlag = FALSE;
 
     // initialize
     threadInfo *info = (threadInfo*)context;
@@ -45,27 +47,43 @@ unsigned __stdcall threadMain(void *context) {
     request->extra = serverResponse->extra = tmpResponse->extra = NULL;
 
     while(1) {
+        connectionCloseFlag = FALSE;
         // receive message from client
-        len = recv(info->client, buf, BUFSIZE, 0);
+        if(!isReadable(info->client)) continue;
+        len = recv(info->client, buf, BUFSIZE-1, 0);
         if(len == SOCKET_ERROR) {
-            fprintf(stderr, "Failed to receive the message from client of thread %d. Error code: %d\n",
-                    info->td, WSAGetLastError());
+            err = WSAGetLastError();
+            if(connectionCloseFlag)
+                break;
+            else {
+                fprintf(stderr, "Failed to receive the message from client of thread %d. Error code: %d\n",
+                        info->td, err);
+                break;
+            }
+        } else if(len == 0)
             break;
-        }
+        buf[len] = '\0';
         printf("Message from client of %d:\n%s\n", info->td, buf);
 
         // parse the HTTP message header
         clearHttpMessage(request);
         err = parseHttpMessage(buf, len, request);
-        if(request == NULL || err) {
-            fprintf(stderr, "Failed to parse the http message from server of thread %d. Error code: %d\n", info->td, err);
+        if(err) {
+            fprintf(stderr, "Failed to parse the http message from client of thread %d. Error code: %d\n", info->td, err);
+            fprintf(stderr, "message length: %d\n", len);
             continue;
         }
         puts("Parsed HTTP request successfully.");
         printf("Get host: %s\n", request->host);
 
+        // check if the connection should be closed
+        const char *connectionField = getValueHandle(request, "Connection");
+        connectionCloseFlag |= (connectionField != NULL && _stricmp(connectionField, "Close") == 0);
+        const char *proxyConnectionField = getValueHandle(request, "Proxy-Connection");
+        connectionCloseFlag |= (proxyConnectionField != NULL && _stricmp(proxyConnectionField, "Close") == 0);
+
         // check if the server is blocked or redirected
-        BOOL responseReadyFlag = FALSE;
+        BOOL localResponseFlag = FALSE;
         char host[ADDR_LEN];
         strcpy(host, request->host);
         if(redirect(request)) {
@@ -73,7 +91,7 @@ unsigned __stdcall threadMain(void *context) {
                 printf("Host %s has been blocked.\n", host);
                 clearHttpMessage(serverResponse);
                 strcpy(serverResponse->firstline, "HTTP/1.1 404 Not Found\r\n\r\n");
-                responseReadyFlag = TRUE;
+                localResponseFlag = TRUE;
             } else {
                 writeMessageTo(request, buf);
             }
@@ -85,21 +103,22 @@ unsigned __stdcall threadMain(void *context) {
          * and buf is corresponding to request, or a proper serverResponse has been set.
          */
 
-        if(!responseReadyFlag && cacheEnabled) {
+        if(!localResponseFlag && cacheEnabled) {
             clearHttpMessage(serverResponse);
             char lastModified[TIME_LEN];
             err = getCachedData(request->firstline, serverResponse, lastModified);
             if(err == CACHE_OK) {
-                responseReadyFlag = TRUE;
+                localResponseFlag = TRUE;
             } else if(err == CACHE_DEAD){
                 insertField(request, "If-Modified-Since", lastModified);
                 writeMessageTo(request, buf);
             } else if(err == CACHE_NOT_FOUND) {
             }
         }
-        if(!responseReadyFlag) {
-            // connect to the server
+
+        if(!localResponseFlag) {
             if(!connected) {
+                // connect to the server
                 info->server = connectToServer(request->host, request->hostPort);
                 if(info->server == INVALID_SOCKET) {
                     fprintf(stderr, "Failed to connect to server of thread %d. Error code: %d\n",
@@ -116,40 +135,54 @@ unsigned __stdcall threadMain(void *context) {
             if(len == SOCKET_ERROR) {
                 fprintf(stderr, "Failed to send the message to server of thread %d. Error code: %d\n",
                         info->td, WSAGetLastError());
-                continue;
+                continue; // TODO: return an error message to the client
             }
-            len = recv(info->server, buf, BUFSIZE, 0);
-            if(len == SOCKET_ERROR) {
-                fprintf(stderr, "Failed to receive the message from server of thread %d. Error code: %d\n",
-                        info->td, WSAGetLastError());
-                continue;
-            }
-            printf("Message from server of %d:\n%s\n", info->td, buf);
-            if(cacheEnabled) {
-                clearHttpMessage(tmpResponse);
-                err = parseHttpMessage(buf, len, tmpResponse);
-                if(strcmp(RESPONSE_STATUS(tmpResponse), HTTP_STATUS_NOT_MODIFIED) == 0) {
-                    responseReadyFlag = TRUE; // the cached response can be used
-                } else {
-                    cacheData(tmpResponse);
+        }
+
+        do {
+            if(!localResponseFlag) {
+                if(!isReadable(info->server)) break;
+                len = recv(info->server, buf, BUFSIZE-1, 0);
+                if(len == SOCKET_ERROR) {
+                    fprintf(stderr, "Failed to receive the message from server of thread %d. Error code: %d\n",
+                            info->td, WSAGetLastError());
+                    // TODO: ditto
+                    break;
+                } else if(len == 0)
+                    break;
+                buf[len] = '\0';
+                printf("Message from server of %d:\n%s\n", info->td, buf);
+                if(cacheEnabled) {
+                    clearHttpMessage(tmpResponse);
+                    err = parseHttpMessage(buf, len, tmpResponse);
+                    if(strcmp(RESPONSE_STATUS(tmpResponse), HTTP_STATUS_NOT_MODIFIED) == 0) {
+                        localResponseFlag = TRUE; // the cached response can be used
+                    } else {
+                        cacheData(tmpResponse); // TODO: use the first line of REQUEST to cache
+                    }
                 }
             }
-        }
-        if(responseReadyFlag) {
-            len = writeMessageTo(serverResponse, buf);
-        }
+            if(localResponseFlag) {
+                len = writeMessageTo(serverResponse, buf);
+            }
 
-        /*
-         * Control reaches there through any path guarantees that buf is a proper response in string.
-         */
+            // send the reply to client
+            len = send(info->client, buf, len, 0);
+            if(len == SOCKET_ERROR) {
+                fprintf(stderr, "Failed to send the message to client of thread %d. Error code: %d\n",
+                        info->td, WSAGetLastError());
+                break;
+            }
 
-        // send the reply to client
-        len = send(info->client, buf, len, 0);
-        if(len == SOCKET_ERROR) {
-            fprintf(stderr, "Failed to send the message to client of thread %d. Error code: %d\n",
-                    info->td, WSAGetLastError());
-            continue;
-        }
+            // check if the connection should be closed
+            if(!localResponseFlag) {
+                const char *connectionField = getValueHandle(tmpResponse, "Connection");
+                connectionCloseFlag |= (connectionField != NULL && _stricmp(connectionField, "Close") == 0);
+                const char *proxyConnectionField = getValueHandle(tmpResponse, "Proxy-Connection");
+                connectionCloseFlag |= (proxyConnectionField != NULL && _stricmp(proxyConnectionField, "Close") == 0);
+            }
+            if(connectionCloseFlag) goto close;
+        } while(!localResponseFlag);
     }
 
 close:
@@ -233,6 +266,16 @@ int loadConfig(const char *file) {
     }
     fclose(f);
     return 0;
+}
+
+BOOL isReadable(SOCKET sd) {
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(sd, &readfds);
+    TIMEVAL timeout;
+    timeout.tv_sec = TIMEOUT/1000;
+    timeout.tv_usec = TIMEOUT%1000;
+    return select(0, &readfds, NULL, NULL, &timeout) > 0;
 }
 
 void initializeServer() {
