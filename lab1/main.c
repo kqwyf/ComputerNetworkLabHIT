@@ -162,12 +162,12 @@ int initializeMainSocket() {
 unsigned __stdcall mainLoop(void *context) {
     while(1) {
         sockaddr_in addr;
-        SOCKET sd = accept(mainSocket, (SOCKADDR*)&addr, NULL);
+        int addrlen = sizeof(addr);
+        SOCKET sd = accept(mainSocket, (SOCKADDR*)&addr, &addrlen);
         if(sd == INVALID_SOCKET && WSAGetLastError() == WSAEINTR)
             break;
-        //TODO: how to get the user's IP?
-        printf("my IP: %s\n", inet_ntoa(addr.sin_addr));
         if(isBlockedUser(addr)) {
+            printf("IP %s tried to connect, but blocked.\n", inet_ntoa(addr.sin_addr));
             closesocket(sd);
             continue;
         }
