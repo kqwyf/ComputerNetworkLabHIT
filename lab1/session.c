@@ -51,7 +51,7 @@ unsigned __stdcall threadMain(void *context) {
         BOOL localResponseFlag = FALSE;
         connectionCloseFlag = FALSE;
         // receive message from client
-        if(!isReadable(info->client)) continue;
+        if(!isReadable(info->client)) break;
         len = recv(info->client, buf, BUFSIZE-1, 0);
         if(len == SOCKET_ERROR) {
             err = WSAGetLastError();
@@ -97,8 +97,8 @@ unsigned __stdcall threadMain(void *context) {
                     localResponseFlag = TRUE;
                 } else {
                     writeMessageTo(request, buf);
+                    printf("The real host to be visited: %s\n", request->host);
                 }
-                printf("The real host to be visited: %s\n", request->host);
             }
 
             /*
