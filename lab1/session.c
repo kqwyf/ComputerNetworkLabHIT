@@ -13,7 +13,7 @@ const char *CONFIG_FILE = "config.ini";
 
 BOOL isReadable(SOCKET sd);
 SOCKET connectToServer(const char *host, const char *hostPort);
-BOOL redirect(httpMessage *request);
+BOOL redirect(httpMessage *request, BOOL removeCookie);
 int closeSocket(SOCKET sd);
 int loadConfig();
 int insertSiteRecord(char *host, int len);
@@ -30,6 +30,7 @@ unsigned __stdcall threadMain(void *context) {
     int err, len;
     BOOL connectionCloseFlag = FALSE;
     BOOL httpsMode = FALSE;
+    BOOL redirected = FALSE;
 
     // initialize
     threadInfo *info = (threadInfo*)context;
@@ -89,12 +90,13 @@ unsigned __stdcall threadMain(void *context) {
             localResponseFlag = FALSE;
             char host[ADDR_LEN];
             strcpy(host, request->host);
-            if(redirect(request)) {
+            if(redirect(request, !redirected)) {
                 if(getValueHandle(request, "Host") == NULL) {
                     printf("Host %s has been blocked.\n", host);
                     clearHttpMessage(serverResponse);
                     strcpy(serverResponse->firstline, HTTP_NOT_FOUND_RESPONSE);
                     localResponseFlag = TRUE;
+                    redirected = TRUE;
                 } else {
                     writeMessageTo(request, buf);
                     printf("The real host to be visited: %s\n", request->host);
@@ -331,22 +333,42 @@ SOCKET connectToServer(const char *host, const char *hostPort) {
     return err ? INVALID_SOCKET : server;
 }
 
-BOOL redirect(httpMessage *request) {
-    //TODO: change the firstline
+BOOL redirect(httpMessage *request, BOOL removeCookie) {
     BOOL result = FALSE;
     for(redirectRecord *record = redirectRecords; record; record = record->next)
         if(strcmp(record->source, request->host) == 0) {
             removeField(request, "Host");
             insertField(request, "Host", record->target);
+            if(removeCookie)
+                removeField(request, "Cookie");
             strcpy(request->host, record->target);
             strcpy(request->hostPort, "http");
+            // change the url in the first line of the request
+            char *url = REQUEST_URL(request);
+            char *suffix = strchr(url, '/');
+            if(suffix != NULL && *(suffix+1) == '/') { // found pattern "//"
+                char *newurl = (char*)malloc(sizeof(char)*ADDR_LEN);
+                int len = suffix + 2 - url;
+                strncpy(newurl, url, len);
+                newurl[len] = '\0';
+                strcat(newurl, record->target);
+                suffix = strchr(suffix+2, '/');
+                int hostLen = suffix - url - len;
+                if(strlen(url) - strlen(record->target) + hostLen >= ADDR_LEN)
+                    break; // new url is too long, redirection failed
+                strcat(newurl, suffix==NULL ? "/" : suffix);
+                setFirstLine(request, NULL, newurl, NULL);
+                free(newurl);
+            }
             result = TRUE;
+            break;
         }
     for(siteRecord *record = siteRecords; record; record = record->next)
         if(strcmp(record->host, request->host) == 0) {
             removeField(request, "Host");
             request->host[0] = '\0';
             result = TRUE;
+            break;
         }
     return result;
 }

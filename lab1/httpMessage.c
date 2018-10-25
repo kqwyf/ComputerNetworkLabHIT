@@ -93,10 +93,36 @@ void fillResponse(httpMessage *message) {
     insertField(message, "Connection", "close");
 }
 
+int setFirstLine(httpMessage *message, const char *str1, const char *str2, const char *str3) {
+    const char *(s[3]) = {str1, str2, str3};
+    int len[3], totalLen = 0;
+    for(int i = 0; i < 3; i++) {
+        if(s[i] == NULL) s[i] = message->infoField[i];
+        len[i] = strlen(s[i]);
+        totalLen += len[i] + 1;
+    }
+    if(totalLen > ADDR_LEN) return -1;
+    char *tmp = (char*)malloc(sizeof(char)*ADDR_LEN);
+    for(int i = 0, totalLen = 0; i < 3; i++) {
+        strcpy(tmp + totalLen, s[i]);
+        totalLen += len[i] + 1;
+    }
+    memcpy(message->firstline, tmp, ADDR_LEN);
+    for(int i = 0, totalLen = 0; i < 3; i++) {
+        message->infoField[i] = message->firstline + totalLen;
+        totalLen += len[i] + 1;
+    }
+    free(tmp);
+    return 0;
+}
+
 int writeMessageTo(httpMessage *message, char *buf) {
     int i = 0;
-    for(int j = 0; message->firstline[j] && i<BUFSIZE-3; j++)
-        buf[i++] = message->firstline[j];
+    for(int j = 0; j < 3 && i < BUFSIZE-3; j++) {
+        for(int k = 0; message->infoField[j][k] && i < BUFSIZE-3; k++)
+            buf[i++] = message->infoField[j][k];
+        if(j < 2) buf[i++] = ' ';
+    }
     buf[i++] = '\r'; buf[i++] = '\n';
     for(headerField *field = message->header; field && i<BUFSIZE-3; field = field->next) {
         for(int j = 0; field->name[j] && i<BUFSIZE-3; j++)
