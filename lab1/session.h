@@ -7,8 +7,15 @@
 #include <process.h>
 #include "constants.h"
 
-#define HTTP_NOT_FOUND_RESPONSE "HTTP/1.1 404 Not Found"
-#define HTTP_CONNECT_RESPONSE "HTTP/1.1 200 Connection Established"
+#define HTTP_VERSION_11 "HTTP/1.1"
+
+#define HTTP_404 "404"
+#define HTTP_200 "200"
+#define HTTP_500 "500"
+
+#define HTTP_404_DESCRIPTION "Not Found"
+#define HTTP_200_DESCRIPTION "Connection Established"
+#define HTTP_500_DESCRIPTION "Internal Server Error"
 
 typedef struct in_addr in_addr;
 typedef struct sockaddr_in sockaddr_in;

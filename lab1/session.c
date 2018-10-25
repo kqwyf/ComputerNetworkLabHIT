@@ -53,7 +53,7 @@ unsigned __stdcall threadMain(void *context) {
         connectionCloseFlag = FALSE;
         // receive message from client
         if(!isReadable(info->client)) break;
-        len = recv(info->client, buf, BUFSIZE-1, 0);
+        len = recv(info->client, buf, BUFSIZE, 0);
         if(len == SOCKET_ERROR) {
             err = WSAGetLastError();
             if(connectionCloseFlag)
@@ -94,12 +94,12 @@ unsigned __stdcall threadMain(void *context) {
                 if(getValueHandle(request, "Host") == NULL) {
                     printf("Host %s has been blocked.\n", host);
                     clearHttpMessage(serverResponse);
-                    strcpy(serverResponse->firstline, HTTP_NOT_FOUND_RESPONSE);
+                    setFirstLine(serverResponse, HTTP_VERSION_11, HTTP_404, HTTP_404_DESCRIPTION);
                     localResponseFlag = TRUE;
-                    redirected = TRUE;
                 } else {
                     writeMessageTo(request, buf);
                     printf("The real host to be visited: %s\n", request->host);
+                    redirected = TRUE;
                 }
             }
 
@@ -134,7 +134,7 @@ unsigned __stdcall threadMain(void *context) {
                 connected = TRUE;
                 if(strcmp(REQUEST_METHOD(request), "CONNECT") == 0) { // HTTPS
                     clearHttpMessage(serverResponse);
-                    strcpy(serverResponse->firstline, HTTP_CONNECT_RESPONSE);
+                    setFirstLine(serverResponse, HTTP_VERSION_11, HTTP_200, HTTP_200_DESCRIPTION);
                     localResponseFlag = TRUE;
                     httpsMode = TRUE;
                 }
@@ -149,7 +149,9 @@ unsigned __stdcall threadMain(void *context) {
                 if(len == SOCKET_ERROR) {
                     fprintf(stderr, "Failed to send the message to server of thread %d. Error code: %d\n",
                             info->td, WSAGetLastError());
-                    continue; // TODO: return an error message to the client
+                    clearHttpMessage(serverResponse);
+                    setFirstLine(serverResponse, HTTP_VERSION_11, HTTP_500, HTTP_500_DESCRIPTION);
+                    localResponseFlag = TRUE;
                 }
             }
         }
@@ -157,14 +159,17 @@ unsigned __stdcall threadMain(void *context) {
         do {
             if(!localResponseFlag) {
                 if(!isReadable(info->server)) break;
-                len = recv(info->server, buf, BUFSIZE-1, 0);
+                len = recv(info->server, buf, BUFSIZE, 0);
                 if(len == SOCKET_ERROR) {
                     fprintf(stderr, "Failed to receive the message from server of thread %d. Error code: %d\n",
                             info->td, WSAGetLastError());
-                    // TODO: ditto
-                    break;
+                    clearHttpMessage(serverResponse);
+                    setFirstLine(serverResponse, HTTP_VERSION_11, HTTP_500, HTTP_500_DESCRIPTION);
+                    localResponseFlag = TRUE;
                 } else if(len == 0)
                     break;
+            }
+            if(!localResponseFlag) {
                 buf[len] = '\0';
                 if(httpsMode) printf("Receiving message from server of %d. Length: %d\n", info->td, len);
                 else printf("Message from server of %d:\n%s\n", info->td, buf);

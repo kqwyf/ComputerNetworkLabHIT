@@ -74,9 +74,13 @@ int parseHttpMessage(const char *message, int len, httpMessage* result) {
 
     // extract extra data
     if((err==PARSE_OK || err==PARSE_HOST_NOT_FOUND) && endOfLine && len > endOfLine + 2 - message) {
-        int extraLen = len - (endOfLine + 2 - message);
-        result->extra = (char*)malloc(sizeof(char)*(extraLen+1));
-        strcpy(result->extra, endOfLine + 2);
+        result->extraLen = len - (endOfLine + 2 - message);
+        if(result->extraLen < 0) result->extraLen = 0;
+        if(result->extraLen > 0) {
+            result->extra = (char*)malloc(sizeof(char)*(result->extraLen));
+            memcpy(result->extra, endOfLine + 2, result->extraLen);
+        } else
+            result->extra = NULL;
     }
     return err;
 }
@@ -132,15 +136,13 @@ int writeMessageTo(httpMessage *message, char *buf) {
             buf[i++] = field->value[j];
         buf[i++] = '\r'; buf[i++] = '\n';
     }
-    if(i<BUFSIZE-3)
+    if(i < BUFSIZE-3)
         buf[i++] = '\r'; buf[i++] = '\n';
     if(message->extra != NULL) {
-        int extraLen = strlen(message->extra);
-        if(i + extraLen < BUFSIZE - 1)
-        strcpy(buf+i, message->extra);
-        return i + extraLen;
+        if(i + message->extraLen < BUFSIZE)
+        memcpy(buf+i, message->extra, message->extraLen);
+        return i + message->extraLen;
     } else {
-        buf[i] = '\0';
         return i;
     }
 }

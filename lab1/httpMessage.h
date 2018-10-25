@@ -29,6 +29,7 @@ typedef struct httpMessage {
     char hostPort[PORT_LEN];
     headerField *header;
     char *extra;
+    int extraLen;
 } httpMessage;
 
 int parseHttpMessage(const char *message, int len, httpMessage* result);
