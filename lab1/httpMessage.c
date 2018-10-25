@@ -85,6 +85,9 @@ int parseHttpMessage(const char *message, int len, httpMessage* result) {
     return err;
 }
 
+/*
+ * Get the pointer to the value of a header field.
+ */
 char *getValueHandle(httpMessage *message, const char *name) {
     for(headerField *field = message->header; field; field = field->next)
         if(strcmp(field->name, name)==0)
@@ -92,11 +95,9 @@ char *getValueHandle(httpMessage *message, const char *name) {
     return NULL;
 }
 
-void fillResponse(httpMessage *message) {
-    strcpy(message->firstline, "HTTP/1.1 200 OK");
-    insertField(message, "Connection", "close");
-}
-
+/*
+ * Set the 3 fields of the first line of an http message.
+ */
 int setFirstLine(httpMessage *message, const char *str1, const char *str2, const char *str3) {
     const char *(s[3]) = {str1, str2, str3};
     int len[3], totalLen = 0;
@@ -120,6 +121,9 @@ int setFirstLine(httpMessage *message, const char *str1, const char *str2, const
     return 0;
 }
 
+/*
+ * Write an http message to a buffer.
+ */
 int writeMessageTo(httpMessage *message, char *buf) {
     int i = 0;
     for(int j = 0; j < 3 && i < BUFSIZE-3; j++) {
@@ -164,6 +168,9 @@ void freeHttpMessage(httpMessage *message) {
     free(message);
 }
 
+/*
+ * Insert a field with a name and a value to an http message.
+ */
 headerField *insertField(httpMessage *message, const char *name, const char *value) {
     return _insertField(message, name, strlen(name), value, strlen(value));
 }
@@ -180,6 +187,9 @@ headerField *_insertField(httpMessage *message, const char *name, int m, const c
     return field;
 }
 
+/*
+ * Remove a field by its name from an http message.
+ */
 BOOL removeField(httpMessage *message, const char *name) {
     for(headerField **fp = &message->header; *fp; fp = &(*fp)->next) {
         if(strcmp((*fp)->name, name) == 0) {

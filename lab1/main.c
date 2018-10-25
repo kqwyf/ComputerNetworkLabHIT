@@ -141,12 +141,16 @@ int initializeMainSocket() {
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(PROXY_PORT);
     serverAddr.sin_addr.S_un.S_addr = INADDR_ANY;
+
+    // bind the socket to port PROXY_PORT
     err = bind(mainSocket, (SOCKADDR*)&serverAddr, sizeof(SOCKADDR));
     if(err) {
         fprintf(stderr, "Failed to bind the socket to port %d.\n", PROXY_PORT);
         return -1;
     }
     printf("Bind the main socket to port %d successfully.\n", PROXY_PORT);
+
+    // start listening
     err = listen(mainSocket, SOMAXCONN);
     if(err) {
         fprintf(stderr, "Failed to start listening on main socket.\n");
@@ -164,24 +168,31 @@ unsigned __stdcall mainLoop(void *context) {
         sockaddr_in addr;
         int addrlen = sizeof(addr);
         SOCKET sd = accept(mainSocket, (SOCKADDR*)&addr, &addrlen);
+        // check if the main socket is closed by outer control
         if(sd == INVALID_SOCKET && WSAGetLastError() == WSAEINTR)
             break;
+        // check if the user is blocked
         if(isBlockedUser(addr)) {
             printf("IP %s tried to connect, but blocked.\n", inet_ntoa(addr.sin_addr));
             closesocket(sd);
             continue;
         }
+        // allocate a space to store the info of the thread and insert it into a list
         threadInfo *info = (threadInfo*)malloc(sizeof(threadInfo));
         info->client = sd;
         info->server = INVALID_SOCKET;
         info->next = threads;
         threads = info;
+        // begin a thread
         _beginthreadex(NULL, 0, threadMain, info, 0, &info->td);
     }
     _endthreadex(0);
     return 0;
 }
 
+/*
+ * Finalise the main socket.
+ */
 int finalizeMainSocket() {
     // close the main socket
     if(mainSocket != INVALID_SOCKET) {

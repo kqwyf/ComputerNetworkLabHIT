@@ -48,11 +48,14 @@ unsigned __stdcall threadMain(void *context) {
     request->header = serverResponse->header = tmpResponse->header = NULL;
     request->extra = serverResponse->extra = tmpResponse->extra = NULL;
 
+    // the main loop of the session
     while(1) {
         BOOL localResponseFlag = FALSE;
         connectionCloseFlag = FALSE;
-        // receive message from client
+
+        // check if there is new data from client
         if(!isReadable(info->client)) break;
+        // receive message from client
         len = recv(info->client, buf, BUFSIZE, 0);
         if(len == SOCKET_ERROR) {
             err = WSAGetLastError();
@@ -65,7 +68,6 @@ unsigned __stdcall threadMain(void *context) {
             }
         } else if(len == 0)
             break;
-        buf[len] = '\0';
         if(httpsMode) printf("Received message from client of %d. Length: %d\n", info->td, len);
         else printf("Message from client of %d:\n%s\n", info->td, buf);
 
@@ -156,7 +158,9 @@ unsigned __stdcall threadMain(void *context) {
             }
         }
 
+        // the receiving-forwarding loop of the session, receiving data from server and forwarding it to client
         do {
+            // receive data from server
             if(!localResponseFlag) {
                 if(!isReadable(info->server)) break;
                 len = recv(info->server, buf, BUFSIZE, 0);
@@ -170,9 +174,9 @@ unsigned __stdcall threadMain(void *context) {
                     break;
             }
             if(!localResponseFlag) {
-                buf[len] = '\0';
                 if(httpsMode) printf("Receiving message from server of %d. Length: %d\n", info->td, len);
                 else printf("Message from server of %d:\n%s\n", info->td, buf);
+                // check if the data should be cached
                 if(cacheEnabled) {
                     clearHttpMessage(tmpResponse);
                     err = parseHttpMessage(buf, len, tmpResponse);
@@ -183,6 +187,7 @@ unsigned __stdcall threadMain(void *context) {
                     }
                 }
             }
+            // if the response has been set, write it to the send buffer
             if(localResponseFlag) {
                 len = writeMessageTo(serverResponse, buf);
             }
@@ -289,6 +294,9 @@ int loadConfig(const char *file) {
     return 0;
 }
 
+/*
+ * Check if a socket is readable (with timeout).
+ */
 BOOL isReadable(SOCKET sd) {
     fd_set readfds;
     FD_ZERO(&readfds);
@@ -338,6 +346,9 @@ SOCKET connectToServer(const char *host, const char *hostPort) {
     return err ? INVALID_SOCKET : server;
 }
 
+/*
+ * Change the request if the host to be visited is blocked or redirected.
+ */
 BOOL redirect(httpMessage *request, BOOL removeCookie) {
     BOOL result = FALSE;
     for(redirectRecord *record = redirectRecords; record; record = record->next)
