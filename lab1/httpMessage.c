@@ -126,12 +126,14 @@ int setFirstLine(httpMessage *message, const char *str1, const char *str2, const
  */
 int writeMessageTo(httpMessage *message, char *buf) {
     int i = 0;
+    // write the first line
     for(int j = 0; j < 3 && i < BUFSIZE-3; j++) {
         for(int k = 0; message->infoField[j][k] && i < BUFSIZE-3; k++)
             buf[i++] = message->infoField[j][k];
         if(j < 2) buf[i++] = ' ';
     }
     buf[i++] = '\r'; buf[i++] = '\n';
+    // write the headers
     for(headerField *field = message->header; field && i<BUFSIZE-3; field = field->next) {
         for(int j = 0; field->name[j] && i<BUFSIZE-3; j++)
             buf[i++] = field->name[j];
@@ -142,6 +144,7 @@ int writeMessageTo(httpMessage *message, char *buf) {
     }
     if(i < BUFSIZE-3)
         buf[i++] = '\r'; buf[i++] = '\n';
+    // write the extra data
     if(message->extra != NULL) {
         if(i + message->extraLen < BUFSIZE)
         memcpy(buf+i, message->extra, message->extraLen);
