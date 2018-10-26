@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <io.h>
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
@@ -35,10 +34,8 @@ int getCachedData(const httpMessage *request, httpMessage *response, char *lastM
     // find the cache file
     char filepath[PATH_LEN];
     getFilepath(request, filepath);
-    printf("*************Finding cache file: %s ****************\n", filepath);
     FILE *f = fopen(filepath, "rb");
     if(f == NULL) return CACHE_NOT_FOUND;
-    printf("*************Found****************\n");
 
     // read the cache file
     cacheInfo info;
@@ -49,7 +46,6 @@ int getCachedData(const httpMessage *request, httpMessage *response, char *lastM
         free(buf);
         return CACHE_NOT_FOUND;
     }
-    printf("*****************Read***************\n");
 
     // check if the cache is valid
     if(time(0) - info.lastUpdated > CACHE_LIFETIME || info.ttl <= 0) {
@@ -73,7 +69,6 @@ int getCachedData(const httpMessage *request, httpMessage *response, char *lastM
     writeCacheFile(f, &info, buf, len);
     fclose(f);
     free(buf);
-    printf("Read cache %s from %s, ttl=%d .\n", REQUEST_URL(request), filepath, info.ttl+1);
     return CACHE_OK;
 }
 
@@ -93,7 +88,6 @@ int cacheData(const httpMessage *request, const char *response, int len, BOOL ov
     if(f == NULL) return -1;
     writeCacheFile(f, overwrite ? &info : NULL, response, len);
     fclose(f);
-    printf("Wrote cache %s to %s\n", REQUEST_URL(request), filepath);
     return 0;
 }
 
