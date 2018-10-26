@@ -9,8 +9,9 @@
 
 #define HTTP_VERSION_11 "HTTP/1.1"
 
-#define HTTP_404 "404"
 #define HTTP_200 "200"
+#define HTTP_304 "304"
+#define HTTP_404 "404"
 #define HTTP_500 "500"
 
 #define HTTP_404_DESCRIPTION "Not Found"

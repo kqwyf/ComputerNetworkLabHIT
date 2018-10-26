@@ -14,6 +14,4 @@
 #define PATH_LEN 64
 #define BUFSIZE 131072
 
-#define HTTP_STATUS_NOT_MODIFIED "304"
-
 #endif
