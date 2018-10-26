@@ -51,6 +51,7 @@ unsigned __stdcall threadMain(void *context) {
     while(1) {
         BOOL localResponseFlag = FALSE;
         BOOL connectionCloseFlag = FALSE;
+        BOOL conditionalGetFlag = FALSE;
 
         // check if there is new data from client
         if(!isReadable(info->client)) break;
@@ -121,6 +122,7 @@ unsigned __stdcall threadMain(void *context) {
                     printf("Cached data for %s has been dead. A conditional GET will be sent to server.\n", REQUEST_URL(request));
                     insertField(request, "If-Modified-Since", lastModified);
                     writeMessageTo(request, buf);
+                    conditionalGetFlag = TRUE;
                 } else if(err == CACHE_NOT_FOUND) {
                     printf("No cache found for %s\n", REQUEST_URL(request));
                 }
@@ -186,7 +188,7 @@ unsigned __stdcall threadMain(void *context) {
                 if(!httpsMode && cacheEnabled) {
                     clearHttpMessage(serverResponse);
                     parserErr = parseHttpMessage(buf, len, serverResponse);
-                    if((parserErr==PARSE_OK || parserErr==PARSE_HOST_NOT_FOUND) && strcmp(RESPONSE_STATUS(serverResponse), HTTP_304) == 0) {
+                    if(conditionalGetFlag && (parserErr==PARSE_OK || parserErr==PARSE_HOST_NOT_FOUND) && strcmp(RESPONSE_STATUS(serverResponse), HTTP_304) == 0) {
                         printf("The dead cached data of %s can be used since data on the server is not modified.\n", REQUEST_URL(request));
                         localResponseFlag = TRUE; // the cached response can be used
                     }
@@ -217,7 +219,7 @@ unsigned __stdcall threadMain(void *context) {
             }
             firstLoop = FALSE;
         } while(!localResponseFlag);
-        if(connectionCloseFlag) break; // TODO: check if this is the right place
+        if(connectionCloseFlag) break;
     }
 
 close:
@@ -267,20 +269,25 @@ int loadConfig(const char *file) {
         if(buf[len - 1] == '\n') buf[--len] = '\0';
         if(buf[len - 1] == '\r') buf[--len] = '\0';
         // switch the state
-        if(strncmp(buf, "[Wall]", 6) == 0)
+        if(strcmp(buf, "[Wall]") == 0)
             state = 1;
-        else if(strncmp(buf, "[BlockedUser]", 13) == 0)
+        else if(strcmp(buf, "[BlockedUser]") == 0)
             state = 2;
-        else if(strncmp(buf, "[Redirect]", 10) == 0)
+        else if(strcmp(buf, "[Redirect]") == 0)
             state = 3;
         else {
             // insert config items
             in_addr addr;
-            char *sp;
+            char *sp, *tmp;
             switch(state) {
                 case 0: // cache config
-                    if(strncmp(buf, "CacheEnabled=1", 14) == 0)
-                        cacheEnabled = TRUE;
+                    sp = strchr(buf, '=');
+                    if(sp == NULL) break;
+                    for(tmp = sp - 1; tmp != buf && *tmp == ' '; tmp--);
+                    if(strncmp(buf, "CacheEnabled", tmp + 1 - buf) == 0) {
+                        for(tmp = sp + 1; tmp - buf < len && *tmp == ' '; tmp++);
+                        cacheEnabled = (strcmp(tmp, "0") != 0);
+                    }
                     break;
                 case 1: // wall config
                     insertSiteRecord(buf, len);
@@ -294,7 +301,8 @@ int loadConfig(const char *file) {
                 case 3: // redirect config
                     sp = strchr(buf, ' ');
                     if(sp == NULL) break;
-                    insertRedirectRecord(buf, sp - buf, sp + 1, buf + len - sp - 1);
+                    for(tmp = sp + 1; tmp - buf < len && *tmp == ' '; tmp++);
+                    insertRedirectRecord(buf, sp - buf, tmp, buf + len - tmp);
                     break;
             }
         }
