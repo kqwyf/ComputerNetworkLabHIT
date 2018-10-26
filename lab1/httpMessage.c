@@ -18,6 +18,7 @@ int parseHttpMessage(const char *message, int len, httpMessage* result) {
 
     // extract the first 3 fields
     int firstLen = endOfLine - message;
+    if(firstLen >= ADDR_LEN) return PARSE_FORMAT_ERROR;
     strncpy(result->firstline, message, firstLen);
     result->firstline[firstLen] = '\0';
     result->infoField[0] = result->firstline;
@@ -63,7 +64,6 @@ int parseHttpMessage(const char *message, int len, httpMessage* result) {
                 strcpy(result->hostPort, "http");
             }
             // get the host
-            result->host[0] = '\0';
             int len = sp - field->value;
             if(len > 0 && len < ADDR_LEN) {
                 strncpy(result->host, field->value, len);
@@ -191,7 +191,7 @@ const char *strnchr(const char *s, int len, const char c) {
 
 headerField *_insertField(httpMessage *message, const char *name, int m, const char *value, int n) {
     headerField *field = (headerField*)malloc(sizeof(headerField));
-    if(field == NULL || m >= NAME_LEN) return NULL;
+    if(field == NULL || m <= 0 || m >= NAME_LEN) return NULL;
     field->value = (char*)malloc(sizeof(char)*(n+1));
     strncpy(field->name, name, m);
     strncpy(field->value, value, n);
