@@ -84,6 +84,7 @@ int cacheData(const httpMessage *request, const char *response, int len, BOOL ov
     // write to the cache file
     char filepath[PATH_LEN];
     getFilepath(request, filepath);
+    CreateDirectoryA(CACHE_DIR, NULL);
     FILE *f = fopen(filepath, overwrite ? "wb" : "ab");
     if(f == NULL) return -1;
     writeCacheFile(f, overwrite ? &info : NULL, response, len);
