@@ -37,7 +37,7 @@ headerField *insertField(httpMessage *message, const char *name, const char *val
 BOOL removeField(httpMessage *message, const char *name);
 char *getValueHandle(httpMessage *message, const char *name);
 int setFirstLine(httpMessage *message, const char *str1, const char *str2, const char *str3);
-int writeMessageTo(httpMessage *message, char *buf);
+int writeMessageTo(const httpMessage *message, char *buf);
 void clearHttpMessage(httpMessage *message);
 void freeHttpMessage(httpMessage *message);
 

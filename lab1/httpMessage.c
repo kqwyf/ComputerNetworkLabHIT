@@ -4,6 +4,7 @@
 
 void freeField(headerField *field);
 headerField *_insertField(httpMessage *message, const char *name, int m, const char *value, int n);
+const char *strnchr(const char *s, int len, const char c);
 
 /*
  * Parse an HTTP message and get the host and the host port.
@@ -12,7 +13,7 @@ int parseHttpMessage(const char *message, int len, httpMessage* result) {
     int err = PARSE_HOST_NOT_FOUND;
     result->header = NULL;
     result->extra = NULL;
-    const char *endOfLine = strchr(message, '\r');
+    const char *endOfLine = strnchr(message, len, '\r');
     if(!endOfLine) return PARSE_FORMAT_ERROR;
 
     // extract the first 3 fields
@@ -20,7 +21,7 @@ int parseHttpMessage(const char *message, int len, httpMessage* result) {
     strncpy(result->firstline, message, firstLen);
     result->firstline[firstLen] = '\0';
     result->infoField[0] = result->firstline;
-    for(int i = 0, j = 1; j < 3 && result->firstline[i] != '\r'; i++) {
+    for(int i = 0, j = 1; i < firstLen && j < 3 && result->firstline[i] != '\r'; i++) {
         if(result->firstline[i] == ' ') {
             result->firstline[i] = '\0';
             result->infoField[j++] = result->firstline + i + 1;
@@ -28,16 +29,16 @@ int parseHttpMessage(const char *message, int len, httpMessage* result) {
     }
 
     // extract the header fields
-    for(const char *i = endOfLine + 2; i && *i; i = endOfLine + 2) {
-        endOfLine = strchr(i, '\r');
+    for(const char *i = endOfLine + 2; i - message <= len; i = endOfLine + 2) {
+        endOfLine = strnchr(i, len - (i - message), '\r');
         if(endOfLine == NULL || endOfLine == i) break; // empty line
-        const char *sp = strchr(i, ':');
+        const char *sp = strnchr(i, len - (i - message), ':');
         if(!sp) {
             err = PARSE_FORMAT_ERROR;
             break;
         }
         int nameLen = sp - i;
-        for(sp++; *sp == ' '; sp++);
+        for(sp++; *sp == ' ' && sp-message <= len; sp++);
         int valueLen = endOfLine - sp;
         headerField *field = _insertField(result, i, nameLen, sp, valueLen);
         if(field == NULL) {
@@ -124,7 +125,7 @@ int setFirstLine(httpMessage *message, const char *str1, const char *str2, const
 /*
  * Write an http message to a buffer.
  */
-int writeMessageTo(httpMessage *message, char *buf) {
+int writeMessageTo(const httpMessage *message, char *buf) {
     int i = 0;
     // write the first line
     for(int j = 0; j < 3 && i < BUFSIZE-3; j++) {
@@ -178,9 +179,19 @@ headerField *insertField(httpMessage *message, const char *name, const char *val
     return _insertField(message, name, strlen(name), value, strlen(value));
 }
 
+/*
+ * Find a char in a given string with length len.
+ */
+const char *strnchr(const char *s, int len, const char c) {
+    if(s == NULL) return NULL;
+    for(int i = 0; i < len; i++)
+        if(s[i] == c) return s + i;
+    return NULL;
+}
+
 headerField *_insertField(httpMessage *message, const char *name, int m, const char *value, int n) {
     headerField *field = (headerField*)malloc(sizeof(headerField));
-    if(field == NULL) return NULL;
+    if(field == NULL || m >= NAME_LEN) return NULL;
     field->value = (char*)malloc(sizeof(char)*(n+1));
     strncpy(field->name, name, m);
     strncpy(field->value, value, n);
