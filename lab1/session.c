@@ -202,7 +202,8 @@ unsigned __stdcall threadMain(void *context) {
             }
 
             // send the reply to client
-            printf("Message to client of %d:\n%s\n", info->td, buf);
+            if(!httpsMode)
+                printf("Message to client of %d:\n%s\n", info->td, buf);
             len = send(info->client, buf, len, 0);
             if(len == SOCKET_ERROR) {
                 fprintf(stderr, "Failed to send the message to client of thread %d. Error code: %d\n",
