@@ -2,5 +2,6 @@
 *.docx
 *.exe
 *.swp
+*.zip
 cached/
 TODO.txt
