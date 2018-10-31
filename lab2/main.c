@@ -83,7 +83,7 @@ finalize:
 void *serverThread(void *context) {
     int serverfd = *(int*)context;
     char *sendBuf = (char*) malloc(sizeof(char)*SND_BUF_SIZE);
-    char *recvBuf = (char*) malloc(sizeof(char)*(RCV_BUF_SIZE));
+    char *recvBuf = (char*) malloc(sizeof(char)*RCV_BUF_SIZE);
     void *sndWindow;
     void *rcvWindow;
     if(gbnMode) {
@@ -98,29 +98,31 @@ void *serverThread(void *context) {
         // receive message
         int len = 0;
         if(gbnMode) {
-            len = gbnRecv((gbnRcvWindow*)sndWindow, serverfd, &clientAddr, recvBuf, RCV_BUF_SIZE);
+            len = gbnRecv((gbnRcvWindow*)rcvWindow, serverfd, &clientAddr, recvBuf, RCV_BUF_SIZE);
             if(len <= 0) continue;
         } else {
             len = srRecv((srRcvWindow*)rcvWindow, serverfd, &clientAddr, recvBuf, RCV_BUF_SIZE);
             if(len <= 0) continue;
         }
         // read and/or print message
-        if(recvBuf[0] == '?') {
-            if(strncmp(recvBuf+1, "hello", 4)) {
-                strcpy(sendBuf, "hello");
-            } else {
-                printf("Received query \"%s\", but cannot understand.\n", recvBuf);
-                continue;
-            }
+        if(recvBuf[0] != '?') { // not query
+            for(int i = 0; i < len; i++)
+                putchar(recvBuf[i]);
+            putchar('\n');
+            continue;
+        }
+        if(strncmp(recvBuf+1, "hello", 5) == 0) {
+            strcpy(sendBuf, "hello");
+            len = 5;
         } else {
-            puts(recvBuf);
+            printf("Received query \"%s\", but cannot understand.\n", recvBuf);
             continue;
         }
         // send reply (if any)
         if(gbnMode) {
-            gbnSend((gbnSndWindow*)sndWindow, serverfd, &clientAddr, sendBuf, len);
+            gbnSend((gbnSndWindow*)sndWindow, serverfd, &clientAddr, sendBuf, len+1);
         } else {
-            srSend((srSndWindow*)sndWindow, serverfd, &clientAddr, sendBuf, len);
+            srSend((srSndWindow*)sndWindow, serverfd, &clientAddr, sendBuf, len+1);
         }
     }
     free(sendBuf);
@@ -177,11 +179,16 @@ void *clientThread(void *context) {
             } else {
                 if(gbnMode) {
                     gbnSend((gbnSndWindow*)sndWindow, clientfd, &serverAddr, sendBuf, len+1);
-                    len = gbnRecv((gbnRcvWindow*)sndWindow, clientfd, &serverAddr, recvBuf, RCV_BUF_SIZE);
+                    len = gbnRecv((gbnRcvWindow*)rcvWindow, clientfd, &serverAddr, recvBuf, RCV_BUF_SIZE);
                 }
                 else {
                     srSend((srSndWindow*)sndWindow, clientfd, &serverAddr, sendBuf, len+1);
                     len = srRecv((srRcvWindow*)rcvWindow, clientfd, &serverAddr, recvBuf, RCV_BUF_SIZE);
+                }
+                if(len > 0) {
+                    for(int i = 0; i < len; i++)
+                        putchar(recvBuf[i]);
+                    putchar('\n');
                 }
             }
         }

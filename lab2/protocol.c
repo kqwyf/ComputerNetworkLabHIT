@@ -76,7 +76,6 @@ int gbnSend(gbnSndWindow *win, int peerfd, struct sockaddr_in *peerAddr, const c
         } else {
             int len = recvfrom(peerfd, ackbuf, sizeof(ackbuf), 0, NULL, NULL);
             if(len <= 0) continue;
-            printf("[SEND] Received something like ACK?");
             message *msg = readMessageFrom(ackbuf, len);
             if(msg != NULL && IS_ACK(msg)) {
                 win->base = msg->seq + 1;
@@ -96,35 +95,37 @@ int gbnRecv(gbnRcvWindow *win, int peerfd, struct sockaddr_in *peerAddr, char *b
     char recvbuf[MESSAGE_MAX_SIZE];
     char ackbuf[128];
     while(1) {
-        int recvlen = recvfrom(peerfd, recvbuf, sizeof(recvbuf), 0, NULL, NULL);
+        socklen_t addrlen;
+        message *msg = NULL;
+        message *ackmsg = NULL;
+        int acklen = 0;
+        int recvlen = recvfrom(peerfd, recvbuf, sizeof(recvbuf), 0, (struct sockaddr*)peerAddr, &addrlen);
         if(recvlen < 0 && errno == EAGAIN) {
             if(timeouted) break; // receiving finished
             timeouted = 1;
-            usleep(DELAY);
-            continue;
+            goto conti;
         }
-        message *msg = readMessageFrom(recvbuf, recvlen);
+        msg = readMessageFrom(recvbuf, recvlen);
         if(msg == NULL) {
             fprintf(stderr, "[RECV] Invalid checksum.\n");
-            usleep(DELAY);
-            continue;
+            goto conti;
         }
         printf("[RECV] Received message of seq %d: %c\n", msg->seq, msg->data[0]);
         if(msg->seq != win->expectedseqnum) {
             fprintf(stderr, "[RECV] Not the expected seq. Dropped.\n");
-            usleep(DELAY);
-            continue;
+            goto conti;
         }
         buf[len++] = msg->data[0];
         win->expectedseqnum = (win->expectedseqnum + 1) % RCV_WIN_SIZE;
-        message *ackmsg = createMessage(msg->seq, 1, NULL, 0);
-        int acklen = writeMessageTo(msg, ackbuf);
+        ackmsg = createMessage(msg->seq, 1, NULL, 0);
+        acklen = writeMessageTo(ackmsg, ackbuf);
         acklen = sendto(peerfd, ackbuf, acklen, 0, (struct sockaddr*)peerAddr, sizeof(struct sockaddr_in));
         if(acklen <= 0) {
             fprintf(stderr, "[RECV] Failed to send ACK of seq %d. Error code: %d\n", msg->seq, errno);
         }
-        freeMessage(msg);
-        freeMessage(ackmsg);
+conti:
+        if(msg) freeMessage(msg);
+        if(ackmsg) freeMessage(ackmsg);
         if(len >= size) break;
         usleep(DELAY);
     }

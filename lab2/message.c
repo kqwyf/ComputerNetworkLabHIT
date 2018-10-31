@@ -26,15 +26,20 @@ message *createMessage(ushort seq, int isAck, const char *data, int len) {
 
 int writeMessageTo(const message *msg, char *buf) {
     int len = 0;
+
     for(ulong i = 0; i < sizeof(msg->seq); i++)
         buf[len++] = ((char*)&msg->seq)[i];
+
     for(ulong i = 0; i < sizeof(msg->flags); i++)
         buf[len++] = ((char*)&msg->flags)[i];
+
     for(ulong i = 0; i < sizeof(msg->len); i++)
         buf[len++] = ((char*)&msg->len)[i];
+
     if(msg->data)
         strncpy(buf+len, msg->data, msg->len);
     len += msg->len;
+
     ushort chksum = checksum(buf, len);
     for(ulong i = 0; i < sizeof(chksum); i++)
         buf[len++] = ((char*)&chksum)[i];
@@ -60,16 +65,17 @@ message *readMessageFrom(const char *buf, int len) {
 
     if(idx + msg->len > len) goto err;
     if(msg->len > 0) {
-        msg->data = (char*) realloc(msg->data, sizeof(char)*msg->len);
+        msg->data = (char*) malloc(sizeof(char)*msg->len);
         strncpy(msg->data, buf+idx, msg->len);
-    }
+    } else
+        msg->data = NULL;
     idx += msg->len;
 
     ushort chksum;
     if(idx + (int)sizeof(chksum) > len) goto err;
     for(ulong i = 0; i < sizeof(chksum); i++)
         ((char*)&chksum)[i] = buf[idx++];
-    if(chksum != checksum(buf, idx)) goto err;
+    if(checksum(buf, len)) goto err;
     return msg;
 err:
     freeMessage(msg);
@@ -77,13 +83,13 @@ err:
 }
 
 ushort checksum(const char *buf, int len) {
+    typedef unsigned char uchar;
     const unsigned int inc = 1<<16;
     unsigned int sum = 0;
     if(len % 2 != 0)
-        sum = buf[len-1];
-    for(int i = 0; i < len; i+=2) {
-        ushort tmp = ((ushort)buf[i]<<16) + (ushort)buf[i+1];
-        sum += tmp;
+        sum = (uchar)buf[0];
+    for(int i = len%2; i < len; i += 2) {
+        sum += (((ushort)(uchar)buf[i+1])<<8) + (uchar)buf[i];
         if(sum & inc)
             sum = (sum & (inc-1)) + 1;
     }
