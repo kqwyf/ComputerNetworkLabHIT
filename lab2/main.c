@@ -4,9 +4,11 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <time.h>
 #include <pthread.h>
 #include "message.h"
 #include "protocol.h"
+#include "channel.h"
 
 #define SND_BUF_SIZE 1024
 #define RCV_BUF_SIZE 1024
@@ -22,6 +24,9 @@ const char *help =
 "/lost <number>     Set the lost rate of sending. The number should be\n"
 "                   in [0,100] and invalid number will be regarded as\n"
 "                   0. The default lost rate is 0.\n"
+"/bit <number>      Set the bit error rate of receiving. The number\n"
+"                   should be in [0,100] and invalid number will be\n"
+"                   regarded as 0. The default bit error rate is 0.\n"
 "/quit              Quit this program.\n";
 
 void *serverThread(void *context);
@@ -30,9 +35,11 @@ void *clientThread(void *context);
 // global configuration
 int gbnMode = 1;
 int lostRate = 0;
+int bitRate = 0;
 
 int main(int argc, char **argv) {
     int err = 0;
+    srand(time(0));
 
     if(argc > 1 && argv[1][0] == 's')
         gbnMode = 0;
@@ -167,6 +174,12 @@ void *clientThread(void *context) {
                     tmpRate = 0;
                 lostRate = tmpRate;
                 printf("[CTRL] The lost rate has been set to %d.\n", lostRate);
+            } else if(strncmp(sendBuf+1, "bit ", 4) == 0) {
+                int tmpRate = atoi(sendBuf+5);
+                if(tmpRate < 0 || tmpRate > 100)
+                    tmpRate = 0;
+                bitRate = tmpRate;
+                printf("[CTRL] The bit error rate has been set to %d.\n", bitRate);
             } else if(strcmp(sendBuf+1, "quit") == 0) {
                 puts("[CTRL] Quit program.");
                 break;

@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include "protocol.h"
+#include "channel.h"
 
 gbnSndWindow *createGbnSndWindow() {
     gbnSndWindow *win = (gbnSndWindow*) malloc(sizeof(gbnSndWindow));
@@ -48,7 +49,7 @@ int gbnSend(gbnSndWindow *win, int peerfd, struct sockaddr_in *peerAddr, const c
             if(win->sndpkt[i]) freeMessage(win->sndpkt[i]);
             win->sndpkt[i] = createMessage(i, 0, buf+index, 1);
             int len = writeMessageTo(win->sndpkt[i], sendbuf);
-            len = sendto(peerfd, sendbuf, len, 0, (struct sockaddr*)peerAddr, sizeof(struct sockaddr_in));
+            len = Sendto(peerfd, sendbuf, len, 0, (struct sockaddr*)peerAddr, sizeof(struct sockaddr_in));
             if(len < 0) {
                 fprintf(stderr, "[SEND] Failed to send message. Error code: %d\n", errno);
                 //continue;
@@ -64,7 +65,7 @@ int gbnSend(gbnSndWindow *win, int peerfd, struct sockaddr_in *peerAddr, const c
             for(int i = win->base; i != win->nextseqnum;) {
                 if(i >= SND_WIN_SIZE) i -= SND_WIN_SIZE;
                 int len = writeMessageTo(win->sndpkt[i], sendbuf);
-                int err = sendto(peerfd, sendbuf, len, 0, (struct sockaddr*)peerAddr, sizeof(struct sockaddr_in));
+                int err = Sendto(peerfd, sendbuf, len, 0, (struct sockaddr*)peerAddr, sizeof(struct sockaddr_in));
                 if(err < 0) {
                     fprintf(stderr, "[SEND] Failed to send message. Error code: %d\n", err);
                     //continue;
@@ -74,7 +75,7 @@ int gbnSend(gbnSndWindow *win, int peerfd, struct sockaddr_in *peerAddr, const c
                 i++;
             }
         } else {
-            int len = recvfrom(peerfd, ackbuf, sizeof(ackbuf), 0, NULL, NULL);
+            int len = Recvfrom(peerfd, ackbuf, sizeof(ackbuf), 0, NULL, NULL);
             if(len <= 0) continue;
             message *msg = readMessageFrom(ackbuf, len);
             if(msg != NULL && IS_ACK(msg)) {
@@ -99,7 +100,7 @@ int gbnRecv(gbnRcvWindow *win, int peerfd, struct sockaddr_in *peerAddr, char *b
         message *msg = NULL;
         message *ackmsg = NULL;
         int acklen = 0;
-        int recvlen = recvfrom(peerfd, recvbuf, sizeof(recvbuf), 0, (struct sockaddr*)peerAddr, &addrlen);
+        int recvlen = Recvfrom(peerfd, recvbuf, sizeof(recvbuf), 0, (struct sockaddr*)peerAddr, &addrlen);
         if(recvlen < 0 && errno == EAGAIN) {
             if(timeouted) break; // receiving finished
             timeouted = 1;
@@ -119,7 +120,7 @@ int gbnRecv(gbnRcvWindow *win, int peerfd, struct sockaddr_in *peerAddr, char *b
         win->expectedseqnum = (win->expectedseqnum + 1) % RCV_WIN_SIZE;
         ackmsg = createMessage(msg->seq, 1, NULL, 0);
         acklen = writeMessageTo(ackmsg, ackbuf);
-        acklen = sendto(peerfd, ackbuf, acklen, 0, (struct sockaddr*)peerAddr, sizeof(struct sockaddr_in));
+        acklen = Sendto(peerfd, ackbuf, acklen, 0, (struct sockaddr*)peerAddr, sizeof(struct sockaddr_in));
         if(acklen <= 0) {
             fprintf(stderr, "[RECV] Failed to send ACK of seq %d. Error code: %d\n", msg->seq, errno);
         }

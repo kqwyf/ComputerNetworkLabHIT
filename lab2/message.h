@@ -24,6 +24,4 @@ int writeMessageTo(const message *msg, char *buf);
 message *readMessageFrom(const char *buf, int len);
 void freeMessage(message *msg);
 
-int insertBitError(char *buf, int len);
-
 #endif

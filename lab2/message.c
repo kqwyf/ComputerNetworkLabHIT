@@ -101,10 +101,3 @@ void freeMessage(message *msg) {
         free(msg->data);
     free(msg);
 }
-
-int insertBitError(char *buf, int len) {
-    if(len <= 0) return 0;
-    srand(time(0));
-    buf[rand()%len] ^= 1<<(rand()%8);
-    return 1;
-}
