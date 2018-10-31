@@ -7,6 +7,9 @@
 #define SND_WIN_SIZE (1<<10)
 #define RCV_WIN_SIZE (1<<10)
 
+#define TIMEOUT 5
+#define DELAY 500000
+
 typedef struct gbnSndWindow {
     message *sndpkt[SND_WIN_SIZE];
     int base;
@@ -37,10 +40,10 @@ gbnRcvWindow *createGbnRcvWindow();
 srSndWindow *createSrSndWindow();
 srRcvWindow *createSrRcvWindow();
 
-int gbnSend(gbnSndWindow *win, int peerfd, sockaddr_in *peerAddr, const char *buf, int len);
-int gbnRecv(gbnRcvWindow *win, int peerfd, sockaddr_in *peerAddr, char *buf, int size);
-int srSend(srSndWindow *win, int peerfd, sockaddr_in *peerAddr, const char *buf, int len);
-int srRecv(srRcvWindow *win, int peerfd, sockaddr_in *peerAddr, char *buf, int size);
+int gbnSend(gbnSndWindow *win, int peerfd, struct sockaddr_in *peerAddr, const char *buf, int len);
+int gbnRecv(gbnRcvWindow *win, int peerfd, struct sockaddr_in *peerAddr, char *buf, int size);
+int srSend(srSndWindow *win, int peerfd, struct sockaddr_in *peerAddr, const char *buf, int len);
+int srRecv(srRcvWindow *win, int peerfd, struct sockaddr_in *peerAddr, char *buf, int size);
 
 void freeGbnSndWindow(gbnSndWindow *win);
 void freeGbnRcvWindow(gbnRcvWindow *win);

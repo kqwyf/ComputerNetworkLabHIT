@@ -4,6 +4,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include "message.h"
 #include "protocol.h"
 
@@ -14,17 +15,17 @@ const char *PEER_IP = "127.0.0.1";
 
 const char *help =
 "Commands:\n"
-"/connect <port>    Set the remote port. The port number should be\n"
-"                   in [1024, 65535].\n"
-"                   You can send messages to remote at the given\n"
-"                   port on 127.0.0.1 after the port has been set.\n"
-"/lost <number>     Set the lost rate of sending. The number should\n"
-"                   be in [0,100] and invalid number will be regarded\n"
-"                   as 0. The default lost rate is 0.\n"
+"/connect <port>    Set the remote port. The port number should be in\n"
+"                   [1024, 65535].\n"
+"                   You can send messages to remote at the given port\n"
+"                   on 127.0.0.1 after the port has been set.\n"
+"/lost <number>     Set the lost rate of sending. The number should be\n"
+"                   in [0,100] and invalid number will be regarded as\n"
+"                   0. The default lost rate is 0.\n"
 "/quit              Quit this program.\n";
 
-void serverThread(int clientfd);
-void clientThread(int serverfd);
+void *serverThread(void *context);
+void *clientThread(void *context);
 
 // global configuration
 int gbnMode = 1;
@@ -38,34 +39,34 @@ int main(int argc, char **argv) {
     printf("The program is running in %s mode.\n", gbnMode?"GBN":"SR");
 
     // initialize sockets
-    int serverfd = socket(AF_INET, SOCK_DGRAM, 0);
-    int clientfd = socket(AF_INET, SOCK_DGRAM, 0);
+    int serverfd = socket(AF_INET, SOCK_DGRAM|SOCK_NONBLOCK, IPPROTO_UDP);
+    int clientfd = socket(AF_INET, SOCK_DGRAM|SOCK_NONBLOCK, IPPROTO_UDP);
     if(serverfd < 0 || clientfd < 0) {
         fprintf(stderr, "Failed to create sockets.\n");
         goto finalize;
     }
 
     // configure sockets
-    ushort myPort;
-    printf("Input the port to bind: ");
-    scanf("%hu", &myPort);
     struct sockaddr_in myAddr;
     myAddr.sin_family = AF_INET;
-    myAddr.sin_port = htons(myPort);
-    myAddr.sin_addr.s_addr = inet_addr(PEER_IP);
-    err = bind(serverfd, (struct sockaddr*)&myAddr, sizeof(myAddr));
+    myAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    for(int port = 10000; port < 65536; port++) {
+        myAddr.sin_port = htons(port);
+        err = bind(serverfd, (struct sockaddr*)&myAddr, sizeof(myAddr));
+        if(!err) break;
+    }
     if(err) {
-        fprintf(stderr, "Failed to bind the port %hu.\n", myPort);
+        fprintf(stderr, "Failed to find a free port.\n");
         goto finalize;
     }
+    printf("Server port: %d\n", ntohs(myAddr.sin_port));
 
     puts(help);
     puts("Start listening...");
-    if(fork() != 0) { // server thread
-        serverThread(clientfd);
-    } else { // client thread
-        clientThread(serverfd);
-    }
+    pthread_t serverTid, clientTid;
+    pthread_create(&serverTid, NULL, serverThread, &serverfd);
+    pthread_create(&clientTid, NULL, clientThread, &clientfd);
+    pthread_join(clientTid, NULL);
 
 finalize:
     if(serverfd >= 0) {
@@ -73,74 +74,119 @@ finalize:
         close(serverfd);
     }
     if(clientfd >= 0) {
-        shutdown(serverfd, SHUT_RDWR);
-        close(serverfd);
+        shutdown(clientfd, SHUT_RDWR);
+        close(clientfd);
     }
     return 0;
 }
 
-void serverThread(int clientfd) {
+void *serverThread(void *context) {
+    int serverfd = *(int*)context;
     char *sendBuf = (char*) malloc(sizeof(char)*SND_BUF_SIZE);
-    char *recvBuf = (char*) malloc(sizeof(char)*RCV_BUF_SIZE);
+    char *recvBuf = (char*) malloc(sizeof(char)*(RCV_BUF_SIZE));
+    void *sndWindow;
+    void *rcvWindow;
+    if(gbnMode) {
+        sndWindow = createGbnSndWindow();
+        rcvWindow = createGbnRcvWindow();
+    } else {
+        sndWindow = createSrSndWindow();
+        rcvWindow = createSrRcvWindow();
+    }
     struct sockaddr_in clientAddr;
     while(1) {
+        // receive message
+        int len = 0;
         if(gbnMode) {
-            int len = gbnRecv(clientfd, &clientAddr, recvBuf, RCV_BUF_SIZE);
-            gbnSend(clientfd, &clientAddr, sendBuf, len);
+            len = gbnRecv((gbnRcvWindow*)sndWindow, serverfd, &clientAddr, recvBuf, RCV_BUF_SIZE);
+            if(len <= 0) continue;
+        } else {
+            len = srRecv((srRcvWindow*)rcvWindow, serverfd, &clientAddr, recvBuf, RCV_BUF_SIZE);
+            if(len <= 0) continue;
         }
-        else {
-            int len = srRecv(clientfd, &clientAddr, recvBuf, RCV_BUF_SIZE);
-            srSend(clientfd, &clientAddr, sendBuf, len);
+        // read and/or print message
+        if(recvBuf[0] == '?') {
+            if(strncmp(recvBuf+1, "hello", 4)) {
+                strcpy(sendBuf, "hello");
+            } else {
+                printf("Received query \"%s\", but cannot understand.\n", recvBuf);
+                continue;
+            }
+        } else {
+            puts(recvBuf);
+            continue;
+        }
+        // send reply (if any)
+        if(gbnMode) {
+            gbnSend((gbnSndWindow*)sndWindow, serverfd, &clientAddr, sendBuf, len);
+        } else {
+            srSend((srSndWindow*)sndWindow, serverfd, &clientAddr, sendBuf, len);
         }
     }
     free(sendBuf);
     free(recvBuf);
+    return NULL;
 }
 
-void clientThread(int serverfd) {
+void *clientThread(void *context) {
+    int clientfd = *(int*)context;
     char *sendBuf = (char*) malloc(sizeof(char)*SND_BUF_SIZE);
     char *recvBuf = (char*) malloc(sizeof(char)*RCV_BUF_SIZE);
     struct sockaddr_in serverAddr;
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_addr.s_addr = inet_addr(PEER_IP);
     serverAddr.sin_port = 0;
+    void *sndWindow;
+    void *rcvWindow;
+    if(gbnMode) {
+        sndWindow = createGbnSndWindow();
+        rcvWindow = createGbnRcvWindow();
+    } else {
+        sndWindow = createSrSndWindow();
+        rcvWindow = createSrRcvWindow();
+    }
     while(1) {
-        fflush(stdin);
         fgets(sendBuf, SND_BUF_SIZE, stdin);
+        int len = strlen(sendBuf);
+        sendBuf[--len] = '\0';
+        if(len == 0) continue;
         if(sendBuf[0] == '/') {
             if(strncmp(sendBuf+1, "connect ", 8) == 0) {
                 int serverPort = atoi(sendBuf+9);
                 if(serverPort < 1024 || serverPort > 65535) {
-                    puts("The port number should be in [1024, 65535].");
+                    puts("[CTRL] The port number should be in [1024, 65535].");
                 } else {
                     serverAddr.sin_port = htons(serverPort);
+                    printf("[CTRL] The remote port has been set to %d.\n", serverPort);
                 }
             } else if(strncmp(sendBuf+1, "lost ", 5) == 0) {
                 int tmpRate = atoi(sendBuf+6);
                 if(tmpRate < 0 || tmpRate > 100)
                     tmpRate = 0;
                 lostRate = tmpRate;
+                printf("[CTRL] The lost rate has been set to %d.\n", lostRate);
             } else if(strcmp(sendBuf+1, "quit") == 0) {
-                puts("Quit program.");
+                puts("[CTRL] Quit program.");
                 break;
             } else {
-                puts("Unknown command.");
+                puts("[CTRL] Unknown command.");
             }
         } else {
             if(serverAddr.sin_port == 0) {
-                puts("You should set the remote port before sending message.");
+                puts("[SEND] You should set the remote port before sending message.");
             } else {
                 if(gbnMode) {
-                    gbnSend(serverfd, &serverAddr, sendBuf);
-                    int len = gbnRecv(serverfd, NULL, recvBuf, RCV_BUF_SIZE);
+                    gbnSend((gbnSndWindow*)sndWindow, clientfd, &serverAddr, sendBuf, len+1);
+                    len = gbnRecv((gbnRcvWindow*)sndWindow, clientfd, &serverAddr, recvBuf, RCV_BUF_SIZE);
                 }
                 else {
-                    srSend(serverfd, &serverAddr, sendBuf);
-                    int len = srRecv(serverfd, NULL, recvBuf, RCV_BUF_SIZE);
+                    srSend((srSndWindow*)sndWindow, clientfd, &serverAddr, sendBuf, len+1);
+                    len = srRecv((srRcvWindow*)rcvWindow, clientfd, &serverAddr, recvBuf, RCV_BUF_SIZE);
                 }
             }
         }
     }
     free(sendBuf);
     free(recvBuf);
+    return NULL;
 }

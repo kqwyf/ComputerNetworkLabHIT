@@ -1,7 +1,2 @@
-all: server client
-
-server:
-	gcc server.c message.c -o server
-
-client:
-	gcc client.c message.c -o client
+all:
+	gcc main.c protocol.c message.c -lpthread -o main

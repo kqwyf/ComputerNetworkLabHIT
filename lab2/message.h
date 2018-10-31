@@ -6,6 +6,7 @@ typedef unsigned short ushort;
 #define L 15
 #define SEQ_MAX_NUM (1<<L)
 #define DATA_MAX_SIZE (1472-sizeof(ushort)*3-sizeof(char))
+#define MESSAGE_MAX_SIZE 1472
 
 typedef struct message {
     ushort seq;
