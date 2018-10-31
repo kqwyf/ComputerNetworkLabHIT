@@ -8,7 +8,7 @@
 #define RCV_WIN_SIZE (1<<10)
 
 #define TIMEOUT 5
-#define DELAY 500000
+#define DELAY 100000
 
 typedef struct gbnSndWindow {
     message *sndpkt[SND_WIN_SIZE];
