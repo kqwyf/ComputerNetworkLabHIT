@@ -7,13 +7,15 @@ typedef unsigned long ulong;
 
 ushort checksum(const char *buf, int len);
 
-message *createMessage(ushort seq, int isAck, const char *data, int len) {
+message *createMessage(ushort seq, int isAck, int hasMore, int isFirst, const char *data, int len) {
     if(len < 0 || (unsigned long)len >= DATA_MAX_SIZE)
         return NULL;
     message *msg = (message*) malloc(sizeof(message));
     if(msg == NULL) return NULL;
     msg->seq = seq;
     SET_ACK(msg, isAck);
+    SET_MORE(msg, hasMore);
+    SET_FIRST(msg, isFirst);
     msg->len = (ushort)len;
     if(len == 0 || data == NULL)
         msg->data = NULL;

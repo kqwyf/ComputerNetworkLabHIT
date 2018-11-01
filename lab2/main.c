@@ -192,11 +192,11 @@ void *clientThread(void *context) {
             } else {
                 if(gbnMode) {
                     gbnSend((gbnSndWindow*)sndWindow, clientfd, &serverAddr, sendBuf, len+1);
-                    len = gbnRecv((gbnRcvWindow*)rcvWindow, clientfd, &serverAddr, recvBuf, RCV_BUF_SIZE);
+                    len = gbnRecv((gbnRcvWindow*)rcvWindow, clientfd, NULL, recvBuf, RCV_BUF_SIZE);
                 }
                 else {
                     srSend((srSndWindow*)sndWindow, clientfd, &serverAddr, sendBuf, len+1);
-                    len = srRecv((srRcvWindow*)rcvWindow, clientfd, &serverAddr, recvBuf, RCV_BUF_SIZE);
+                    len = srRecv((srRcvWindow*)rcvWindow, clientfd, NULL, recvBuf, RCV_BUF_SIZE);
                 }
                 if(len > 0) {
                     for(int i = 0; i < len; i++)

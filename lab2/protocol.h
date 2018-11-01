@@ -4,10 +4,12 @@
 #include <arpa/inet.h>
 #include "message.h"
 
+// WARNING: window size must be power of 2
 #define SND_WIN_SIZE (1<<10)
 #define RCV_WIN_SIZE (1<<10)
 
 #define TIMEOUT 5
+#define TIMEOUT_MAX_COUNT 5
 #define DELAY 100000
 
 typedef struct gbnSndWindow {
