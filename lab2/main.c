@@ -43,13 +43,13 @@ int main(int argc, char **argv) {
 
     if(argc > 1 && argv[1][0] == 's')
         gbnMode = 0;
-    printf("The program is running in %s mode.\n", gbnMode?"GBN":"SR");
+    printf("[INFO] The program is running in %s mode.\n", gbnMode?"GBN":"SR");
 
     // initialize sockets
     int serverfd = socket(AF_INET, SOCK_DGRAM|SOCK_NONBLOCK, IPPROTO_UDP);
     int clientfd = socket(AF_INET, SOCK_DGRAM|SOCK_NONBLOCK, IPPROTO_UDP);
     if(serverfd < 0 || clientfd < 0) {
-        fprintf(stderr, "Failed to create sockets.\n");
+        fprintf(stderr, "[EROR] Failed to create sockets.\n");
         goto finalize;
     }
 
@@ -63,13 +63,13 @@ int main(int argc, char **argv) {
         if(!err) break;
     }
     if(err) {
-        fprintf(stderr, "Failed to find a free port.\n");
+        fprintf(stderr, "[EROR] Failed to find a free port.\n");
         goto finalize;
     }
-    printf("Server port: %d\n", ntohs(myAddr.sin_port));
+    printf("[INFO] Server port: %d\n", ntohs(myAddr.sin_port));
 
     puts(help);
-    puts("Start listening...");
+    puts("[INFO] Start listening...");
     pthread_t serverTid, clientTid;
     pthread_create(&serverTid, NULL, serverThread, &serverfd);
     pthread_create(&clientTid, NULL, clientThread, &clientfd);
@@ -122,7 +122,7 @@ void *serverThread(void *context) {
             strcpy(sendBuf, "hello");
             len = 5;
         } else {
-            printf("Received query \"%s\", but cannot understand.\n", recvBuf);
+            printf("[INFO] Received query \"%s\", but cannot understand.\n", recvBuf);
             continue;
         }
         // send reply (if any)

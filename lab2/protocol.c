@@ -40,18 +40,20 @@ int gbnSend(gbnSndWindow *win, int peerfd, struct sockaddr_in *peerAddr, const c
     int result = 0;
     char sendbuf[MESSAGE_MAX_SIZE];
     char ackbuf[128];
-    int timeoutCount = 0;
+    int timeoutCount = 0; // counter for timeout. too many timeout lead to terminating sending
     win->timer = TIMEOUT;
     do {
         // send data
         while((win->nextseqnum - win->base + SEQ_MAX_NUM) % SEQ_MAX_NUM <= SND_WIN_SIZE
                 && index < len) { // window is not full
+            // create packet
             int seq = win->nextseqnum++;
             int pktIndex = seq % SND_WIN_SIZE;
             if(win->nextseqnum >= SEQ_MAX_NUM)
                 win->nextseqnum -= SEQ_MAX_NUM;
             if(win->sndpkt[pktIndex]) freeMessage(win->sndpkt[pktIndex]);
             win->sndpkt[pktIndex] = createMessage(seq, 0, index!=len-1, index==0, buf+index, 1);
+            // send packet to peer
             int len = writeMessageTo(win->sndpkt[pktIndex], sendbuf);
             len = Sendto(peerfd, sendbuf, len, 0, (struct sockaddr*)peerAddr, sizeof(struct sockaddr_in));
             if(len < 0) {
@@ -68,12 +70,14 @@ int gbnSend(gbnSndWindow *win, int peerfd, struct sockaddr_in *peerAddr, const c
         while(1) {
             int len = Recvfrom(peerfd, ackbuf, sizeof(ackbuf), 0, NULL, NULL);
             if(len <= 0) break;
+            // read packet
             message *msg = readMessageFrom(ackbuf, len);
             if(msg != NULL && IS_ACK(msg)) {
                 if(win->base != (msg->seq + 1) % SEQ_MAX_NUM) {
                     timeoutCount = 0;
                     result += (msg->seq - win->base + 1 + SEQ_MAX_NUM) % SEQ_MAX_NUM;
                 }
+                // slide window and restart timer
                 win->base = (msg->seq + 1) % SEQ_MAX_NUM;
                 win->timer = TIMEOUT + 1; // timer will be TIMEOUT after decreasing it by 1
                 printf("[SEND] Received ACK for seq: %d\n", msg->seq);
@@ -90,6 +94,7 @@ int gbnSend(gbnSndWindow *win, int peerfd, struct sockaddr_in *peerAddr, const c
             } else {
                 puts("[SEND] TIMEOUT. Trying to send again.");
             }
+            // resend the unACKed packets
             for(int seq = win->base; seq != win->nextseqnum; seq = (seq + 1) % SEQ_MAX_NUM) {
                 int pktIndex = seq % SND_WIN_SIZE;
                 int len = writeMessageTo(win->sndpkt[pktIndex], sendbuf);
@@ -113,8 +118,9 @@ int gbnRecv(gbnRcvWindow *win, int peerfd, struct sockaddr_in *peerAddr, char *b
     int len = 0;
     char recvbuf[MESSAGE_MAX_SIZE];
     char ackbuf[128];
-    int waitFlag = 0;
-    int timer = TIMEOUT * TIMEOUT_MAX_COUNT;
+    int waitFlag = 0; // receiver should wait for sometime after receiving all data in order
+                      // not to let the sender wait for ACK
+    int timer = TIMEOUT * TIMEOUT_MAX_COUNT; // timer for waiting (see above)
     struct sockaddr_in tmpAddr;
     win->expectedseqnum = INVALID_SEQ; // receive message with any seq number is allowed
     tmpAddr.sin_family = AF_INET;
@@ -126,6 +132,7 @@ int gbnRecv(gbnRcvWindow *win, int peerfd, struct sockaddr_in *peerAddr, char *b
         message *ackmsg = NULL;
         if(peerAddr == NULL) peerAddr = &tmpAddr;
         int acklen = 0;
+        // receive data
         int recvlen = Recvfrom(peerfd, recvbuf, sizeof(recvbuf), 0, (struct sockaddr*)peerAddr, &addrlen);
         if(recvlen < 0) {
             if(errno == EAGAIN) {
@@ -137,13 +144,14 @@ int gbnRecv(gbnRcvWindow *win, int peerfd, struct sockaddr_in *peerAddr, char *b
             goto conti;
         }
         timer = TIMEOUT * TIMEOUT_MAX_COUNT;
+        // read packet
         msg = readMessageFrom(recvbuf, recvlen);
         if(msg == NULL) {
             fprintf(stderr, "[RECV] Invalid checksum.\n");
             goto conti;
         }
         printf("[RECV] Received message of seq %d: %c\n", msg->seq, msg->data[0]);
-        if(win->expectedseqnum == INVALID_SEQ) {
+        if(win->expectedseqnum == INVALID_SEQ) { // waiting for the first package
             if(IS_FIRST(msg)) win->expectedseqnum = msg->seq;
             else {
                 fprintf(stderr, "[RECV] Not the first packet. Dropped.\n");
@@ -153,10 +161,11 @@ int gbnRecv(gbnRcvWindow *win, int peerfd, struct sockaddr_in *peerAddr, char *b
         if(msg->seq != win->expectedseqnum) {
             fprintf(stderr, "[RECV] Not the expected seq. Dropped.\n");
         } else {
-            waitFlag = !HAS_MORE(msg);
+            waitFlag = !HAS_MORE(msg); // start waiting if this is the last packet
             buf[len++] = msg->data[0];
             win->expectedseqnum = (msg->seq + 1) % SEQ_MAX_NUM;
         }
+        // send ACK
         ackmsg = createMessage((win->expectedseqnum-1+SEQ_MAX_NUM)%SEQ_MAX_NUM, 1, 0, 0, NULL, 0);
         acklen = writeMessageTo(ackmsg, ackbuf);
         acklen = Sendto(peerfd, ackbuf, acklen, 0, (struct sockaddr*)peerAddr, sizeof(struct sockaddr_in));
@@ -168,6 +177,7 @@ conti:
         if(ackmsg) freeMessage(ackmsg);
         if(waitFlag && timer-- <= 0) break; // receiving finished
         if(len >= size) break; // too much data
+        // simulate timer
         usleep(DELAY);
     }
     return len;
