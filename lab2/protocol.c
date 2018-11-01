@@ -54,9 +54,9 @@ int gbnSend(gbnSndWindow *win, int peerfd, struct sockaddr_in *peerAddr, const c
             if(win->sndpkt[pktIndex]) freeMessage(win->sndpkt[pktIndex]);
             win->sndpkt[pktIndex] = createMessage(seq, 0, index!=len-1, index==0, buf+index, 1);
             // send packet to peer
-            int len = writeMessageTo(win->sndpkt[pktIndex], sendbuf);
-            len = Sendto(peerfd, sendbuf, len, 0, (struct sockaddr*)peerAddr, sizeof(struct sockaddr_in));
-            if(len < 0) {
+            int sndlen = writeMessageTo(win->sndpkt[pktIndex], sendbuf);
+            sndlen = Sendto(peerfd, sendbuf, sndlen, 0, (struct sockaddr*)peerAddr, sizeof(struct sockaddr_in));
+            if(sndlen < 0) {
                 fprintf(stderr, "[SEND] Failed to send message. Error code: %d\n", errno);
                 //continue;
             } else {
@@ -68,10 +68,10 @@ int gbnSend(gbnSndWindow *win, int peerfd, struct sockaddr_in *peerAddr, const c
         usleep(DELAY);
         // receive ACKs
         while(1) {
-            int len = Recvfrom(peerfd, ackbuf, sizeof(ackbuf), 0, NULL, NULL);
-            if(len <= 0) break;
+            int acklen = Recvfrom(peerfd, ackbuf, sizeof(ackbuf), 0, NULL, NULL);
+            if(acklen <= 0) break;
             // read packet
-            message *msg = readMessageFrom(ackbuf, len);
+            message *msg = readMessageFrom(ackbuf, acklen);
             if(msg != NULL && IS_ACK(msg)) {
                 if(win->base != (msg->seq + 1) % SEQ_MAX_NUM) {
                     timeoutCount = 0;
@@ -97,8 +97,8 @@ int gbnSend(gbnSndWindow *win, int peerfd, struct sockaddr_in *peerAddr, const c
             // resend the unACKed packets
             for(int seq = win->base; seq != win->nextseqnum; seq = (seq + 1) % SEQ_MAX_NUM) {
                 int pktIndex = seq % SND_WIN_SIZE;
-                int len = writeMessageTo(win->sndpkt[pktIndex], sendbuf);
-                int err = Sendto(peerfd, sendbuf, len, 0, (struct sockaddr*)peerAddr, sizeof(struct sockaddr_in));
+                int sndlen = writeMessageTo(win->sndpkt[pktIndex], sendbuf);
+                int err = Sendto(peerfd, sendbuf, sndlen, 0, (struct sockaddr*)peerAddr, sizeof(struct sockaddr_in));
                 if(err < 0) {
                     fprintf(stderr, "[SEND] Failed to send message. Error code: %d\n", err);
                     //continue;
@@ -107,7 +107,7 @@ int gbnSend(gbnSndWindow *win, int peerfd, struct sockaddr_in *peerAddr, const c
                 }
             }
         }
-    } while(win->base != win->nextseqnum);
+    } while(win->base != win->nextseqnum || index < len);
     win->base = win->nextseqnum; // clear window with no respect whether all data been sent
     if(result == len) puts("[SEND] All data has been sent.");
     else printf("[SEND] %d bytes of data has been sent.\n", result);
@@ -133,8 +133,8 @@ int gbnRecv(gbnRcvWindow *win, int peerfd, struct sockaddr_in *peerAddr, char *b
         if(peerAddr == NULL) peerAddr = &tmpAddr;
         int acklen = 0;
         // receive data
-        int recvlen = Recvfrom(peerfd, recvbuf, sizeof(recvbuf), 0, (struct sockaddr*)peerAddr, &addrlen);
-        if(recvlen < 0) {
+        int rcvlen = Recvfrom(peerfd, recvbuf, sizeof(recvbuf), 0, (struct sockaddr*)peerAddr, &addrlen);
+        if(rcvlen < 0) {
             if(errno == EAGAIN) {
                 if(timer-- <= 0)
                     waitFlag = 1; // free resources and break
@@ -145,7 +145,7 @@ int gbnRecv(gbnRcvWindow *win, int peerfd, struct sockaddr_in *peerAddr, char *b
         }
         timer = TIMEOUT * TIMEOUT_MAX_COUNT;
         // read packet
-        msg = readMessageFrom(recvbuf, recvlen);
+        msg = readMessageFrom(recvbuf, rcvlen);
         if(msg == NULL) {
             fprintf(stderr, "[RECV] Invalid checksum.\n");
             goto conti;
