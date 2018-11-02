@@ -9,7 +9,8 @@
 #define RCV_WIN_SIZE (1<<10)
 
 #define TIMEOUT 5
-#define TIMEOUT_MAX_COUNT 5
+#define TIMEOUT_MAX_COUNT 10
+#define WAIT_TIMEOUT 15
 #define DELAY 100000
 
 typedef struct gbnSndWindow {
