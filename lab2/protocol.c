@@ -246,7 +246,7 @@ int srSend(srSndWindow *win, int peerfd, struct sockaddr_in *peerAddr, const cha
                     while(win->base != win->nextseqnum && win->isrcved[win->base%SND_WIN_SIZE])
                         win->base = (win->base + 1) % SEQ_MAX_NUM;
                 }
-                printf("[SEND] Received ACK for seq: %d\n", msg->seq);
+                printf("[SEND] Received ACK for seq %d\n", msg->seq);
             }
             if(msg) freeMessage(msg);
         }
@@ -383,12 +383,11 @@ conti:
     if(lastSeq >= 0 && (int)win->base == (lastSeq + 1) % SEQ_MAX_NUM) {
         puts("[RECV] All data has been received.");
         return len;
-    }
-    else if(firstFlag) {
+    } else if(firstFlag) {
         printf("[RECV] %d continuous bytes of data has been received.\n", len);
         return -len;
-    }
-    else return 0;
+    } else
+        return 0;
 }
 
 void freeGbnSndWindow(gbnSndWindow *win) {
