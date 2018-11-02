@@ -17,7 +17,7 @@ ssize_t Recvfrom(int sockfd, void *buf, size_t len, int flags,
                  struct sockaddr *src_addr, socklen_t *addrlen) {
     ssize_t result = recvfrom(sockfd, buf, len, flags, src_addr, addrlen);
     if(result > 0 && rand()%100 < bitRate)
-        insertBitError(buf, len);
+        insertBitError(buf, result);
     return result;
 }
 
